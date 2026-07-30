@@ -118,10 +118,35 @@ export class Engine {
     if (Math.abs(this._dpr - before) > 0.001) this.resize();
   }
 
+  /**
+   * Resolve with a PNG data URL of the next rendered frame.
+   *
+   * The capture harness cannot use Playwright's page.screenshot() here: under
+   * software WebGL a full frame of this scene takes long enough that the
+   * compositor path times out. Reading the drawing buffer inside the same
+   * callstack as the draw avoids the compositor entirely, and works without
+   * preserveDrawingBuffer (which would cost a copy every frame).
+   */
+  grab() {
+    return new Promise((resolve) => (this._grabs ||= []).push(resolve));
+  }
+
   render(dt) {
     this.frame++;
     this._adaptResolution(dt);
     this.composer.render(dt);
+
+    if (this._grabs?.length) {
+      let url = '';
+      try {
+        url = this.canvas.toDataURL('image/png');
+      } catch (err) {
+        url = `error:${err.message}`;
+      }
+      const waiting = this._grabs;
+      this._grabs = [];
+      for (const resolve of waiting) resolve(url);
+    }
   }
 
   dispose() {

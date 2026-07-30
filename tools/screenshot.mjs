@@ -145,8 +145,33 @@ async function main() {
     await page.waitForTimeout((shot.settle ?? SETTLE) * 1000);
 
     const file = path.join(OUT, `${shot.name}.png`);
-    // Software WebGL under load can take a while to produce a frame.
-    await page.screenshot({ path: file, type: 'png', timeout: 180000 });
+    // Read the drawing buffer from inside the render callstack. page.screenshot
+    // goes through the compositor, which times out on a scene this heavy under
+    // SwiftShader; __duck.grab() resolves straight after composer.render().
+    let wrote = false;
+    try {
+      const dataUrl = await page.evaluate(
+        () => window.__duck?.grab?.() ?? null,
+        null,
+      );
+      if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/png')) {
+        await writeFile(file, Buffer.from(dataUrl.split(',')[1], 'base64'));
+        wrote = true;
+      } else if (typeof dataUrl === 'string') {
+        pageErrors.push(`grab(${shot.name}): ${dataUrl.slice(0, 120)}`);
+      }
+    } catch (e) {
+      pageErrors.push(`grab(${shot.name}): ${e.message.slice(0, 160)}`);
+    }
+    if (!wrote) {
+      // Fall back to the compositor path so a broken grab still yields an image.
+      try {
+        await page.screenshot({ path: file, type: 'png', timeout: 120000 });
+        wrote = true;
+      } catch (e) {
+        pageErrors.push(`screenshot(${shot.name}): ${e.message.slice(0, 120)}`);
+      }
+    }
 
     const perf = await page.evaluate(() => {
       const e = window.__duck?.engine;

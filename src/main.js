@@ -128,6 +128,7 @@ class Game {
       missing: this.missing,
       stubs: this.stubs,
       errors: this.errors || [],
+      grab: () => this.engine.grab(),
       setTime: (v) => { settings.timeOfDay = v; },
       teleport: (s, u = 0) => this.sys.player?.teleportRiver?.(s, u),
       screenshotMode: (on = true) => { this._hideUI = on; document.body.classList.toggle('capture', on); },
