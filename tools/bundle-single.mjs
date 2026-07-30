@@ -59,7 +59,9 @@ async function main() {
     const file = href && resolve(href);
     if (!file) continue;
     const css = await inlineAssets(await readFile(file, 'utf8'));
-    html = html.replace(m[0], `<style>\n${css}\n</style>`);
+    // Function replacer: a string replacement would interpret $&, $', $1 …
+    // which minified code and CSS are full of.
+    html = html.replace(m[0], () => `<style>\n${css}\n</style>`);
   }
 
   // Module preloads are pointless once everything is inline.
@@ -84,7 +86,7 @@ async function main() {
     let js = await inlineAssets(await readFile(file, 'utf8'));
     // Guard against a stray </script> inside a template literal or shader.
     js = js.replace(/<\/script>/gi, '<\\/script>');
-    html = html.replace(m[0], `<script type="module">\n${js}\n</script>`);
+    html = html.replace(m[0], () => `<script type="module">\n${js}\n</script>`);
   }
 
   await mkdir(OUT_DIR, { recursive: true });

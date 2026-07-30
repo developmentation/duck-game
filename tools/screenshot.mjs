@@ -145,7 +145,8 @@ async function main() {
     await page.waitForTimeout((shot.settle ?? SETTLE) * 1000);
 
     const file = path.join(OUT, `${shot.name}.png`);
-    await page.screenshot({ path: file, type: 'png' });
+    // Software WebGL under load can take a while to produce a frame.
+    await page.screenshot({ path: file, type: 'png', timeout: 180000 });
 
     const perf = await page.evaluate(() => {
       const e = window.__duck?.engine;
