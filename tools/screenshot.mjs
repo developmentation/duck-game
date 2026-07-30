@@ -8,7 +8,14 @@
 //   node tools/screenshot.mjs --out shots/run7 --width 1600 --height 900
 //   node tools/screenshot.mjs --only sunrise,dive
 
-import { chromium } from 'playwright';
+// Playwright comes from the globally installed copy, which matches the
+// pre-downloaded Chromium in /opt/pw-browsers. Do not add it to package.json —
+// a different version re-downloads browsers that this box has no network for.
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { chromium } = require(
+  process.env.PW_MODULE || '/opt/node22/lib/node_modules/playwright'
+);
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';

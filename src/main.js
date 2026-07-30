@@ -11,22 +11,22 @@ import { River } from './world/river.js';
  * throws) degrades to "missing" instead of taking the whole river with it.
  */
 const MANIFEST = [
-  { key: 'sky', path: './world/sky.js', cls: 'Sky', note: 'raising the sun' },
-  { key: 'terrain', path: './world/terrain.js', cls: 'Terrain', note: 'shaping the banks' },
-  { key: 'water', path: './world/water.js', cls: 'Water', note: 'pouring the river' },
-  { key: 'underwater', path: './world/underwater.js', cls: 'Underwater', note: 'flooding the light' },
-  { key: 'vegetation', path: './world/vegetation.js', cls: 'Vegetation', note: 'planting reeds' },
-  { key: 'fish', path: './entities/fish.js', cls: 'FishSchools', note: 'releasing the fish' },
-  { key: 'particles', path: './entities/particles.js', cls: 'Particles', note: 'blowing bubbles' },
-  { key: 'wildlife', path: './entities/wildlife.js', cls: 'Wildlife', note: 'waking the dragonflies' },
-  { key: 'player', path: './entities/duckPlayer.js', cls: 'DuckPlayer', note: 'hatching a duckling' },
-  { key: 'family', path: './entities/family.js', cls: 'Family', note: 'gathering the family' },
-  { key: 'camera', path: './entities/cameraRig.js', cls: 'CameraRig', note: 'framing the shot' },
-  { key: 'postfx', path: './render/postfx.js', cls: 'PostFX', note: 'grading the image' },
-  { key: 'audio', path: './gameplay/audio.js', cls: 'Audio', note: 'tuning the morning' },
-  { key: 'quests', path: './gameplay/quests.js', cls: 'Quests', note: 'writing the story' },
-  { key: 'minigames', path: './gameplay/minigames.js', cls: 'Minigames', note: 'setting up games' },
-  { key: 'hud', path: './gameplay/hud.js', cls: 'HUD', note: 'painting the interface' },
+  { key: 'sky', load: () => import('./world/sky.js'), cls: 'Sky', note: 'raising the sun' },
+  { key: 'terrain', load: () => import('./world/terrain.js'), cls: 'Terrain', note: 'shaping the banks' },
+  { key: 'water', load: () => import('./world/water.js'), cls: 'Water', note: 'pouring the river' },
+  { key: 'underwater', load: () => import('./world/underwater.js'), cls: 'Underwater', note: 'flooding the light' },
+  { key: 'vegetation', load: () => import('./world/vegetation.js'), cls: 'Vegetation', note: 'planting reeds' },
+  { key: 'fish', load: () => import('./entities/fish.js'), cls: 'FishSchools', note: 'releasing the fish' },
+  { key: 'particles', load: () => import('./entities/particles.js'), cls: 'Particles', note: 'blowing bubbles' },
+  { key: 'wildlife', load: () => import('./entities/wildlife.js'), cls: 'Wildlife', note: 'waking the dragonflies' },
+  { key: 'player', load: () => import('./entities/duckPlayer.js'), cls: 'DuckPlayer', note: 'hatching a duckling' },
+  { key: 'family', load: () => import('./entities/family.js'), cls: 'Family', note: 'gathering the family' },
+  { key: 'camera', load: () => import('./entities/cameraRig.js'), cls: 'CameraRig', note: 'framing the shot' },
+  { key: 'postfx', load: () => import('./render/postfx.js'), cls: 'PostFX', note: 'grading the image' },
+  { key: 'audio', load: () => import('./gameplay/audio.js'), cls: 'Audio', note: 'tuning the morning' },
+  { key: 'quests', load: () => import('./gameplay/quests.js'), cls: 'Quests', note: 'writing the story' },
+  { key: 'minigames', load: () => import('./gameplay/minigames.js'), cls: 'Minigames', note: 'setting up games' },
+  { key: 'hud', load: () => import('./gameplay/hud.js'), cls: 'HUD', note: 'painting the interface' },
 ];
 
 class Game {
@@ -48,6 +48,7 @@ class Game {
 
     this.systems = [];
     this.missing = [];
+    this.stubs = [];
     this.paused = false;
     this.time = { elapsed: 0, dt: 0, frame: 0 };
 
@@ -66,11 +67,9 @@ class Game {
       river: this.river,
       time: this.time,
       WATER_LEVEL,
-      // Filled in as systems boot; a system may be undefined if it failed.
-      get sky() { return game.sys.sky; },
-      get water() { return game.sys.water; },
-      get terrain() { return game.sys.terrain; },
-      get player() { return game.sys.player; },
+      // ctx.sky, ctx.water, ctx.player … are assigned as each system boots, so
+      // a system that failed or has not booted yet reads as undefined. Always
+      // guard with `?.` when reaching across systems.
       get(key) { return game.sys[key]; },
     };
     this.sys = Object.create(null);
@@ -84,9 +83,10 @@ class Game {
     for (const entry of MANIFEST) {
       if (note) note.textContent = `${entry.note}…`;
       try {
-        const mod = await import(/* @vite-ignore */ entry.path);
+        const mod = await entry.load();
         const Cls = mod[entry.cls] || mod.default;
         if (!Cls) throw new Error(`module has no export "${entry.cls}"`);
+        if (Cls.stub) this.stubs.push(entry.key);
         const inst = new Cls(this.ctx);
         this.sys[entry.key] = inst;
         this.ctx[entry.key] = inst;
@@ -126,6 +126,7 @@ class Game {
       river: this.river,
       sys: this.sys,
       missing: this.missing,
+      stubs: this.stubs,
       errors: this.errors || [],
       setTime: (v) => { settings.timeOfDay = v; },
       teleport: (s, u = 0) => this.sys.player?.teleportRiver?.(s, u),
