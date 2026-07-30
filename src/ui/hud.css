@@ -1,0 +1,115 @@
+/* Base shell. The HUD system owns everything inside #ui-root; this file holds
+   the page frame, the boot screen and shared design tokens. */
+
+:root {
+  --ink: #0d1b1e;
+  --paper: #f6f1e4;
+  --reed: #7d9a5a;
+  --duck-amber: #e8a13a;
+  --water: #2f7f96;
+  --deep: #0b2b33;
+  --shadow: 0 6px 26px rgba(8, 26, 30, 0.35);
+  --ui-font: ui-rounded, 'Nunito', 'Quicksand', 'Segoe UI', system-ui, sans-serif;
+  --safe: 22px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #06171c;
+  font-family: var(--ui-font);
+  color: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
+#app { position: fixed; inset: 0; }
+
+#scene {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+  cursor: crosshair;
+}
+
+#ui-root {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  user-select: none;
+  z-index: 10;
+}
+
+#ui-root > * { pointer-events: auto; }
+
+/* Capture mode: the visual critic should judge the render, not the HUD. */
+body.capture #ui-root { opacity: 0; }
+
+/* ── boot screen ───────────────────────────────────────────────────────── */
+
+#boot {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(120% 90% at 50% 0%, #cfe9f4 0%, #8fc0d8 38%, #2b6577 76%, #10333d 100%);
+  transition: opacity 1s ease 0.15s, visibility 1s;
+}
+
+#boot.gone { opacity: 0; visibility: hidden; }
+
+.boot-inner { text-align: center; transform: translateY(-4vh); }
+
+.boot-title {
+  font-size: clamp(38px, 7vw, 84px);
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  color: #10333d;
+  text-shadow: 0 2px 0 rgba(255, 255, 255, 0.5);
+}
+
+.boot-sub {
+  margin-top: 2px;
+  font-size: clamp(13px, 1.6vw, 18px);
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: rgba(16, 51, 61, 0.72);
+}
+
+.boot-bar {
+  margin: 28px auto 10px;
+  width: min(320px, 62vw);
+  height: 5px;
+  border-radius: 99px;
+  background: rgba(16, 51, 61, 0.18);
+  overflow: hidden;
+}
+
+.boot-bar > i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #f3c66b, #e8a13a);
+  transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.boot-note {
+  font-size: 13px;
+  color: rgba(16, 51, 61, 0.66);
+  font-style: italic;
+  min-height: 1.2em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #boot, .boot-bar > i { transition: none; }
+}
