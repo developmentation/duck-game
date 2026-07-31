@@ -168,3 +168,43 @@ Requests for other owners:
 * **fish** — `vegetation.coverAt(s, u)` is the weed-density query you asked for.
   It returns the same 0..1 drift density that decides where reeds and submerged
   weed actually get planted, so `coverAt > 0.5` really is a weed bed.
+
+## family (`src/entities/family.js`)
+
+* **What is on `ctx`** — `ctx.family` / `ctx.get('family')` exposes
+  `family.mother` (agent), `family.ducklings` (array of agents),
+  `family.leader` (the mother agent, or the player system when most of the
+  brood has defected to you), `family.distanceToPlayer` (player → mother),
+  `family.distanceToNearest`, `family.followingPlayer` (count),
+  `family.gather()` and `family.setTarget(worldPos)`. Every agent has
+  `.position`, `.velocity`, `.yaw`, `.coord` ({s,u,distance}), `.duck` (the
+  `createDuck` handle), `.leader`, `.state` and `.gap`. Quests / minigames can
+  read `family.mother.coord.s` for "how far downstream is the family".
+* **measured cost, hero view, `high` tier**: the family adds **27 draw calls
+  and 102k triangles** to the frame (157 → 130 calls and 1.062M → 959k
+  triangles when `family.group.visible` is toggled between two consecutive
+  frames). That is 9 skinned meshes drawn about 2.7× each — main pass,
+  planar reflection and shadow map. Measurement harness is in
+  `tools/shots/family.json` (`window.__famDelta()`).
+* **duckling down shell is OFF** — `createDuck({ downShell: true })` adds a
+  second transparent pass per duckling, measured at +16 draw calls and +24k
+  triangles for a brood of eight. The frame is already over the 380 budget
+  before the family exists, so `downShell` is hard-coded `false` in
+  `Family.init()`. One-line flip when there is headroom.
+* **water** — the family shares the 24 global ripple slots, so it only sheds
+  wake rings for ducks inside 15 m of camera (24 m for the mother) and only
+  every 0.85–1.25 m of travel. If `RIPPLE_SLOTS` ever grows, the family can
+  afford a ring every ~0.4 m and the line will read much wetter.
+* **player scale mismatch (`duckPlayer.js`)** — the player is built as
+  `variant: 'drake', scale: 1.0` (~0.55 m long) but the story says the player
+  *is* one of these ducklings. The family is sized so the mother reads as an
+  adult (~0.75 m) and the brood as ducklings (~0.24–0.33 m), which makes the
+  player duck read as an adult drake swimming with a hen and her chicks. If
+  the player switched to `variant: 'duckling', scale: ~1.5` the premise would
+  land; the family sizes are then already correct and need no change.
+* **terrain** — I use `terrain.rocks` (position/radius/submerged) to build a
+  bucketed index of boulders that break the surface, for avoidance and for
+  letting a duck clamber onto a barely-submerged rock. There is no
+  `terrain.surfaceHeightAt()`; `river.bedHeight()` plus that rock index is
+  what the family stands on. A real `surfaceHeightAt(x, z)` that includes the
+  boulder instances would let me drop ~40 lines.
