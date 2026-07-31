@@ -55,20 +55,20 @@ function leafPath(g, len, wid) {
 function drawCluster(g, ox, oy, size, rng, style) {
   const cx = ox + size * 0.5;
   const cy = oy + size * 0.5;
-  const R = size * 0.46;
-  const lobes = 3 + ((rng() * 3) | 0);
+  const R = size * 0.47;
+  const lobes = 3 + ((rng() * 4) | 0);
   const lobePhase = rng() * 6.283;
-  const n = 46 + ((rng() * 26) | 0);
-  const leafLen = size * (style === 3 ? 0.10 : 0.135);
+  const n = 78 + ((rng() * 34) | 0);
+  const leafLen = size * 0.082;
   for (let i = 0; i < n; i++) {
     const ang = rng() * 6.283;
     // lobed boundary keeps the silhouette from being a circle
     const lobe = 0.68 + 0.32 * Math.sin(ang * lobes + lobePhase);
-    const rr = R * lobe * Math.pow(rng(), 0.55);
+    const rr = R * lobe * Math.pow(rng(), 0.72);
     const x = cx + Math.cos(ang) * rr;
     const y = cy + Math.sin(ang) * rr * 0.86;
     const l = leafLen * (0.6 + rng() * 0.7);
-    const w = l * (0.30 + rng() * 0.22);
+    const w = l * (0.32 + rng() * 0.26);
     // depth shading inside the cluster: leaves near the rim catch light
     const d = clamp(rr / R, 0, 1);
     const v = 118 + d * 96 + rng() * 40;
@@ -406,22 +406,22 @@ varying float vIsLeaf;`
     if (sp === 'willow') {
       height = 5.4 + rng() * 3.4;
       trunkR = 0.20 + rng() * 0.13;
-      levels = 3; spread = 0.78; upBias = 0.42;
-      crownR = 1.9 + rng() * 0.9; crownY = 0.62;
+      levels = 3; spread = 0.88; upBias = 0.42;
+      crownR = 1.15 + rng() * 0.70; crownY = 0.62;
       leanOut = 0.30 + rng() * 0.26;   // leans out over the water
       fronds = true;
     } else if (sp === 'slender') {
       height = 8.5 + rng() * 6.0;
       trunkR = 0.15 + rng() * 0.10;
-      levels = 3; spread = 0.34; upBias = 0.80;
-      crownR = 1.3 + rng() * 0.6; crownY = 0.74;
+      levels = 3; spread = 0.44; upBias = 0.80;
+      crownR = 0.85 + rng() * 0.50; crownY = 0.74;
       leanOut = (rng() - 0.5) * 0.10;
       fronds = false;
     } else {
       height = 6.5 + rng() * 5.5;
       trunkR = 0.26 + rng() * 0.18;
-      levels = 3; spread = 0.62; upBias = 0.40;
-      crownR = 2.2 + rng() * 1.2; crownY = 0.66;
+      levels = 3; spread = 0.80; upBias = 0.40;
+      crownR = 1.25 + rng() * 0.85; crownY = 0.66;
       leanOut = (rng() - 0.5) * 0.16;
       fronds = false;
     }
@@ -440,9 +440,13 @@ varying float vIsLeaf;`
 
     const phase = rng();
     const windRef = [base.x, base.z, phase, 0, 0];
+    // Every tree leans its crown somewhere: symmetric crowns read as lollipops.
+    const bAng = rng() * 6.283;
+    const bias = new THREE.Vector3(Math.cos(bAng), 0.12, Math.sin(bAng))
+      .multiplyScalar(0.30 + rng() * 0.34);
     const ctxT = {
       bark, leaf, rng, base, height, windRef,
-      leafBase, barkA, barkB, crownR, crownY, sp, fronds,
+      leafBase, barkA, barkB, crownR, crownY, sp, fronds, bias,
       cards: 0,
     };
 
@@ -498,9 +502,9 @@ varying float vIsLeaf;`
 
     // Side shoots along the parent plus a continuing leader: this is what
     // stops every branch fanning out from a single point.
-    const kids = depth === 0 ? 3 + ((rng() * 2) | 0) : 2 + ((rng() * 2) | 0);
+    const kids = depth === 0 ? 3 + ((rng() * 3) | 0) : 2 + ((rng() * 2) | 0);
     for (let k = 0; k < kids; k++) {
-      const at = 0.42 + (k / Math.max(1, kids)) * 0.5 + rng() * 0.12;
+      const at = (depth === 0 ? 0.50 : 0.36) + (k / Math.max(1, kids)) * 0.48 + rng() * 0.10;
       const ni = clamp(Math.round(at * rings), 1, rings);
       const node = nodes[ni];
       const ang = rng() * 6.283;
@@ -513,8 +517,9 @@ varying float vIsLeaf;`
         .copy(sub).multiplyScalar(1 - spread)
         .addScaledVector(outDir, spread)
         .addScaledVector(new THREE.Vector3(0, 1, 0), upBias * 0.5 - 0.15)
+        .addScaledVector(T.bias, 1.0)
         .normalize();
-      const childLen = len * (0.52 + rng() * 0.26) * (depth === 0 ? 0.9 : 0.82);
+      const childLen = len * (0.60 + rng() * 0.30) * (depth === 0 ? 0.92 : 0.84);
       const childRad = rad * (0.46 + rng() * 0.18);
       this._branch(T, node.p, child, childLen, childRad, depth + 1, levels, spread * 0.86, upBias * 0.8);
     }
@@ -611,7 +616,7 @@ varying float vIsLeaf;`
         const r2 = this._a.copy(right).multiplyScalar(cr).addScaledVector(upv, sr);
         const u2 = this._b.copy(right).multiplyScalar(-sr).addScaledVector(upv, cr);
 
-        const sz = (0.52 + rng() * 0.52) * clamp(R * 0.85, 0.4, 1.9);
+        const sz = (0.22 + rng() * 0.26) * clamp(R * 0.60, 0.28, 0.86);
         const h = clamp((pos.y - base.y) / height, 0, 1.4);
         const sway = 0.42 + Math.pow(h, 1.3) * 0.95;
         const lag = clamp(0.55 + h * 0.55 + depth * 0.12, 0, 1.5);

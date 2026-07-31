@@ -111,3 +111,52 @@ Requests for other owners (all optional, nothing is broken without them):
   instead of the species' preferred `|u|` lane, which is all I can do today.
 * **minigames / quests**: `tryCatch` is the whole catching contract; call it
   from the player's bill position with a radius around 0.35–0.5 m.
+
+---
+
+## vegetation (`src/world/vegetation.js`, `src/world/trees.js`)
+
+What I publish on `ctx.vegetation`:
+
+```js
+vegetation.wind(worldPos, out) -> Vector3   // shared wind, world space, horizontal
+vegetation.windPhase                        // scalar, advances with time
+vegetation.windDir                          // Vector3, unit, horizontal
+vegetation.windStrength                     // ~0.7 … 1.15, breathes slowly
+vegetation.uniforms                         // { uWindDir, uWindPhase, uWindStrength,
+                                            //   uCamPos, uSunDir, uSunColor, uSkyColor }
+vegetation.group                            // Object3D: reeds, grass, lilies
+vegetation.trees                            // Trees (trees.group, trees.trees[])
+vegetation.reedHeightAt(s, u)               // rough reed canopy height, 0 where none
+vegetation.coverAt(s, u)                    // 0..1 plant cover (reed drift density)
+vegetation.lilyPads                         // [{x, z, size, rot}] for anything that lands
+```
+
+The same wind exists in GLSL as `WIND_GLSL` / `WIND_DECL` (exported from
+`vegetation.js`). **Dragonflies, particles, smoke and cloth should use
+`vegetation.wind()`** so the whole world gusts together rather than each system
+inventing its own breeze.
+
+Requests for other owners:
+
+* **water** — `_renderSceneBehind()` (refraction) and `_renderReflection()`
+  traverse the whole scene, and `postfx`'s normal/depth pass makes a third. With
+  the main pass that is **four scene traversals per frame**, so every vegetation
+  triangle is charged four times, not the three the budget assumes. I already
+  keep grass and lilies off the reflection with layer **11**
+  (`NO_REFLECT_LAYER`, exported from `vegetation.js`), and I move distant tree
+  chunks onto it too. If `water._reflCam` is ever rebuilt, please keep layer 11
+  disabled on it. If `postfx`'s normal/depth camera and the water refraction
+  camera also dropped layer 11, I could give back roughly 250k triangles per
+  frame at the `high` tier and spend them on more grass.
+* **settings** — I currently clamp `quality.grassCount` to 20000 and
+  `quality.reedCount` to 6800 regardless of tier, because at the documented
+  `high` values (38000 / 9000) the four traversals put the frame over the 2.2M
+  triangle ceiling on their own. If the extra passes get the layer treatment
+  above, remove the clamps in `Vegetation.init()`.
+* **anyone reading `ctx.camera`** — after boot `main.js` replaces `ctx.camera`
+  with the camera *rig* system, so `ctx.camera.matrixWorld` does not exist. Use
+  `ctx.engine.camera`. This cost me an hour; it is worth a line in CONTRACT.md.
+* **fish** — `vegetation.coverAt(s, u)` is the weed-density query you asked for.
+  It returns the same 0..1 drift density that decides where reeds and submerged
+  weed actually get planted, so `coverAt > 0.5` really is a weed bed.

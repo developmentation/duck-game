@@ -630,7 +630,8 @@ varying float vTip;`
           transMask = 0.4;
         } else {
           const tall = rng();
-          h = lerp(0.75, 2.35, tall * tall * 0.7 + rng() * 0.3);
+          h = lerp(0.85, 2.45, tall * tall * 0.7 + rng() * 0.3);
+          if (rng() < 0.14) h *= 1.35;   // the odd bulrush stands proud
           // reeds standing in water are the tall ones
           if (gy < -0.2) h = Math.max(h, 1.25);
           flex = 0.75 + rng() * 0.6;
@@ -695,15 +696,15 @@ varying float vTip;`
       head: false,
       baseColor: 0x2e4530,
       midColor: 0x5e7436,
-      tipColor: 0x9aa050,
+      tipColor: 0xb2ad5c,
     });
     this._geoms.push(geo);
 
     const total = this.grassCount;
     const mat = this._plantMaterial({
       bend: 0.34,
-      fadeStart: 25,
-      fadeEnd: 39,
+      fadeStart: 30,
+      fadeEnd: 46,
       trans: 1.35,
       transPow: 2.4,
     });
@@ -727,7 +728,7 @@ varying float vTip;`
     this._grassVeg = aVeg;
     this.group.add(mesh);
 
-    const slabCount = 10;
+    const slabCount = 12;
     this.grassField = new SlabField(
       mesh, [aVeg], slabCount,
       Math.floor(total / slabCount), 8,
@@ -793,7 +794,7 @@ varying float vTip;`
         river.toWorld(s + ds, uu, 0, p);
         p.y = y0 + slope * dInl - 0.03;
 
-        const h = lerp(0.22, 0.78, Math.pow(rng(), 1.3)) * (1 - dryness * 0.18);
+        const h = lerp(0.30, 1.05, Math.pow(rng(), 1.3)) * (1 - dryness * 0.18);
         const yaw = rng() * Math.PI * 2;
         e.set((rng() - 0.5) * 0.5, yaw, (rng() - 0.5) * 0.5, 'YXZ');
         q.setFromEuler(e);
@@ -895,12 +896,24 @@ varying float vTip;`
     this.lilyPads = pads;
   }
 
+  /**
+   * 0..1 plant cover at a river coordinate — the same drift density that
+   * decides where reeds and submerged weed actually get planted, so `> 0.5`
+   * really is a weed bed. Fish shelter, quests and audio can all read it.
+   */
+  coverAt(s, u) {
+    const a = Math.abs(u);
+    if (a < 0.72 || a > 1.34) return 0;
+    const side = u < 0 ? -1 : 1;
+    const drift = this.noise.fbm2(s * 0.045, side * 21.7, 3);
+    const d = smoothstep(drift, -0.34, 0.30);
+    const band = smoothstep(a, 0.72, 0.88) * (1 - smoothstep(a, 1.18, 1.34));
+    return d * band;
+  }
+
   /** Approximate reed canopy height above the ground at a river coordinate. */
   reedHeightAt(s, u) {
-    const a = Math.abs(u);
-    if (a < 0.9 || a > 1.2) return 0;
-    const d = smoothstep(this.noise.fbm2(s * 0.045, Math.sign(u) * 21.7, 3), -0.34, 0.3);
-    return d * 1.8;
+    return this.coverAt(s, u) * 1.9;
   }
 
   // ── per frame ────────────────────────────────────────────────────────────
