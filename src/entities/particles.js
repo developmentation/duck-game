@@ -599,6 +599,7 @@ export class Particles {
             a = (body * 0.75 + crest * 0.55) * vP2.x * life;
           }
 
+          if (vP2.w > 0.5) a *= smoothstep(7.0, 22.0, vZ);
           a *= softFade(vZ, kind < 0.5 ? 2.6 : (kind < 1.5 ? 0.22 : 0.7));
           float fog = fogAmount(vZ);
           col = mix(col, uFogColor, fog * 0.65);
@@ -1456,18 +1457,20 @@ export class Particles {
         if (persistent) {
           // mist banks: recycle around the camera along the river
           const dx = s.px[i] - cam.x, dz = s.pz[i] - cam.z;
-          if (dx * dx + dz * dz > 95 * 95) {
+          const d2 = dx * dx + dz * dz;
+          if (d2 > 95 * 95 || d2 < 11 * 11) {
             if (river) {
               const rc = river.toRiver(cam, this._rc);
-              const ns = rc.s + (rng() - 0.22) * 150;
+              const ns = rc.s + (rng() < 0.75 ? 20 + rng() * 70 : -(20 + rng() * 50));
               const nu = (rng() * 2 - 1) * 1.3;
               river.toWorld(ns, nu, 0, this._v3);
               s.px[i] = this._v3.x; s.pz[i] = this._v3.z;
             } else {
-              s.px[i] = cam.x + (rng() - 0.5) * 130;
-              s.pz[i] = cam.z + (rng() - 0.5) * 130;
+              const ang = rng() * Math.PI * 2, rad = 22 + rng() * 60;
+              s.px[i] = cam.x + Math.cos(ang) * rad;
+              s.pz[i] = cam.z + Math.sin(ang) * rad;
             }
-            s.py[i] = level + 0.18 + rng() * 0.85;
+            s.py[i] = level + 0.12 + rng() * 0.65;
             s.seed[i] = rng();
           }
         } else {
@@ -1506,7 +1509,7 @@ export class Particles {
       if (kind === S_CLOUD) {
         if (persistent) {
           life01 = 1;
-          alpha = mist * (0.34 + 0.24 * s.seed[i]);
+          alpha = mist * (0.20 + 0.16 * s.seed[i]);
           w = s.size[i]; h = s.a0[i];
         } else {
           const f = s.age[i] / s.life[i];
@@ -1538,7 +1541,7 @@ export class Particles {
       iParams2[k * 4] = alpha;
       iParams2[k * 4 + 1] = s.a2[i];
       iParams2[k * 4 + 2] = ring;
-      iParams2[k * 4 + 3] = 0;
+      iParams2[k * 4 + 3] = (kind === S_CLOUD && persistent) ? 1 : 0;
       iColor[k * 3] = s.c0[i]; iColor[k * 3 + 1] = s.c1[i]; iColor[k * 3 + 2] = s.c2[i];
     }
     this._sheetDraw = n;

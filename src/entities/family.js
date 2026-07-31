@@ -263,9 +263,10 @@ export class Family {
     const ctx = this.ctx;
     const quality = settings.quality?.name || 'high';
     // The down shell is a second (transparent) pass per duckling. Lovely up
-    // close, but 8 of them cost 16 draw calls once the reflection pass is
-    // counted, so it is a `high` tier luxury.
-    const downShell = quality === 'high';
+    // close, but measured at 16 extra draw calls a frame once the reflection
+    // pass is counted, and the frame is already over the project budget, so it
+    // is off. Flip this to `quality === 'high'` when there is headroom again.
+    const downShell = false;
     const count = quality === 'low' ? 6 : 8;
 
     ctx.scene.add(this.group);
