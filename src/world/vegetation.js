@@ -349,6 +349,7 @@ export class Vegetation {
         windGlsl: WIND_GLSL,
         uniforms: this.uniforms,
         noise: this.noise,
+        noReflectLayer: NO_REFLECT_LAYER,
       });
       await this.trees.init();
     } catch (err) {
@@ -477,7 +478,7 @@ varying float vTip;`
     });
     this._geoms.push(geo);
 
-    const weedCount = Math.round(this.reedCount * 0.22);
+    const weedCount = Math.round(this.reedCount * 0.16);
     const total = this.reedCount + weedCount;
     this.reedTotal = total;
     this.weedCount = weedCount;
@@ -693,8 +694,8 @@ varying float vTip;`
     const total = this.grassCount;
     const mat = this._plantMaterial({
       bend: 0.34,
-      fadeStart: 46,
-      fadeEnd: 74,
+      fadeStart: 44,
+      fadeEnd: 68,
       trans: 1.35,
       transPow: 2.4,
     });
@@ -718,7 +719,7 @@ varying float vTip;`
     this._grassVeg = aVeg;
     this.group.add(mesh);
 
-    const slabCount = 18;
+    const slabCount = 14;
     this.grassField = new SlabField(
       mesh, [aVeg], slabCount,
       Math.floor(total / slabCount), 10,
