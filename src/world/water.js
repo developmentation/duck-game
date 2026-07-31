@@ -255,6 +255,8 @@ export class Water {
     this._stRx = new Float32Array(stN);
     this._stRz = new Float32Array(stN);
     this._stHw = new Float32Array(stN);
+    this._stEL = new Float32Array(stN);
+    this._stER = new Float32Array(stN);
     const p = this._v0, r = this._v1, t = this._v2;
     for (let i = 0; i < stN; i++) {
       const s = this._s0 + i * this._stStep;
@@ -272,6 +274,9 @@ export class Water {
       this._stRx[i] = r.x;
       this._stRz[i] = r.z;
       this._stHw[i] = river.halfWidth(sc);
+      // The waterline, shared with the ground ribbon so the two agree exactly.
+      this._stEL[i] = shoreU(river, sc, -1);
+      this._stER[i] = shoreU(river, sc, 1);
     }
 
     // ---- cross table -----------------------------------------------------
@@ -287,12 +292,20 @@ export class Water {
     for (let i = 0; i < cxN; i++) {
       const s = this._s0 + i * this._cxStep;
       const sc = Math.min(river.length, Math.max(0, s));
+      const eL = shoreU(river, sc, -1);
+      const eR = shoreU(river, sc, 1);
       const base = i * C;
       for (let j = 0; j < C; j++) {
-        const uc = Math.min(1, Math.max(-1, this._cols[j]));
+        const v = this._cols[j];
+        // Signed still-water depth at this vertex: positive in water, negative
+        // once the bed has climbed out of it. This single number is what the
+        // shader's shore alpha, its skirt drop and the foam gate all key off,
+        // and it is measured from the same bed the ground ribbon draws.
+        const u = Math.min(1.35, Math.max(-1.35, v * (v < 0 ? eL : eR)));
+        const uc = Math.min(1, Math.max(-1, u));
         river.flowAt(sc, uc, flow);
         const sp = Math.hypot(flow.x, flow.z);
-        this._cDepth[base + j] = river.depth(sc, uc);
+        this._cDepth[base + j] = this.level - river.bedHeight(sc, u);
         this._cSpeed[base + j] = sp;
         if (sp > 1e-5) {
           this._cFdx[base + j] = flow.x / sp;
@@ -362,6 +375,7 @@ export class Water {
       const cx = this._stCx[si], cz = this._stCz[si];
       const rx = this._stRx[si], rz = this._stRz[si];
       const hw = this._stHw[si];
+      const eL = this._stEL[si], eR = this._stER[si];
 
       // cross table, interpolated along s
       let cf = (s - this._s0) * cxInv;
@@ -373,25 +387,24 @@ export class Water {
 
       const rowBase = i * C;
       for (let j = 0; j < C; j++) {
-        const u = cols[j];
+        const v = cols[j];
+        const e = v < 0 ? eL : eR;
         const o = rowBase + j;
-        const off = u * hw;
-        const au = Math.abs(u);
-        // Sink the outer skirt so it is always safely under the beach: the bed
-        // feathers to the still level over the last 6% of u, which would otherwise
-        // z-fight the terrain along the whole shoreline.
-        let skirt = 0;
-        if (au > 0.955) {
-          const t = smoothstep01((au - 0.955) / 0.045);
-          skirt = -SKIRT_DROP * t;
-        }
+        const off = v * e * hw;
+        const av = Math.abs(v);
+        // Past the waterline the ribbon dives under the beach. Inside it the
+        // surface stays exactly at the still level, so wherever the ground
+        // ribbon's linear interpolation dips below zero there is always water
+        // above it to fill the hollow — no wedges, and nothing to z-fight,
+        // because the shore alpha has already reached zero by v = 1.
+        const skirt = av > 1.0 ? -SKIRT_DROP * smoothstep01((av - 1.0) / 0.05) : 0;
         pos[o * 3] = cx + rx * off;
         pos[o * 3 + 1] = this.level + skirt;
         pos[o * 3 + 2] = cz + rz * off;
         aSU[o * 3] = s;
-        aSU[o * 3 + 1] = u;
+        aSU[o * 3 + 1] = v;
         // metres back from the waterline; negative once we are over the beach
-        aSU[o * 3 + 2] = (1 - au) * hw;
+        aSU[o * 3 + 2] = (1 - av) * e * hw;
         const d0 = this._cDepth[b0 + j], d1 = this._cDepth[b1 + j];
         aDepth[o] = d0 + (d1 - d0) * ct;
         const fx0 = this._cFdx[b0 + j], fx1 = this._cFdx[b1 + j];
@@ -776,6 +789,10 @@ export class Water {
     const depth = river.depth(c.s, uc);
     river.flowAt(c.s, uc, this._flowV);
     const sp = Math.hypot(this._flowV.x, this._flowV.z);
+    // Normalised cross parameter — the same v the ribbon is built in, so the
+    // CPU query dies out at the real waterline instead of at |u| = 1.
+    const e = this._edgeAt(c.s, c.u < 0 ? -1 : 1);
+    const v = c.u / (e || 1);
     this._smpDepth = depth;
     this._smpSpeed = sp;
     if (sp > 1e-5) {
@@ -785,9 +802,23 @@ export class Water {
       this._smpFdx = 0;
       this._smpFdz = 1;
     }
-    this._smpAmp = waterAmpJS(depth, c.u, sp);
-    this._smpRipMask = 1 - smoothstep01((Math.abs(c.u) - 0.72) / 0.28);
+    this._smpAmp = waterAmpJS(depth, v, sp);
+    this._smpRipMask = 1 - smoothstep01((Math.abs(v) - 0.72) / 0.28);
     return c;
+  }
+
+  /** Waterline |u| from the baked station table (falls back to the solver). */
+  _edgeAt(s, side) {
+    const t = this._stEL;
+    if (!t) return shoreU(this.river, s, side);
+    let f = (s - this._s0) / this._stStep;
+    const max = this._stN - 1;
+    if (!(f > 0)) f = 0; else if (f > max) f = max;
+    const i = f | 0;
+    const j = Math.min(max, i + 1);
+    const k = f - i;
+    const a = side < 0 ? this._stEL : this._stER;
+    return a[i] + (a[j] - a[i]) * k;
   }
 
   /**
@@ -796,6 +827,7 @@ export class Water {
    * horizontal displacement, so this lands within a few mm of what is drawn.
    */
   heightAt(x, z) {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return this.level;
     this._sample(x, z);
     const t = this._elapsed;
     const w = evalWaves(x, z, t, this._smpFdx, this._smpFdz, this._smpSpeed,
@@ -803,7 +835,14 @@ export class Water {
     const w2 = evalWaves(x - w.dx, z - w.dz, t, this._smpFdx, this._smpFdz,
       this._smpSpeed, this._smpAmp, this._wave2);
     evalRipples(this._ripples, x, z, this._rip);
-    return this.level + w2.dy + this._rip.h * this._smpRipMask;
+    const h = this.level + w2.dy + this._rip.h * this._smpRipMask;
+    // Anything that floats trusts this number, so it is bounded on purpose: a
+    // physically impossible surface height is what drags the duck into the dive
+    // state and holds it there. WAVE_AMP_TOTAL + RIPPLE_H_MAX is the most the
+    // shader can ever displace a vertex by.
+    if (!Number.isFinite(h)) return this.level;
+    const lim = this.level + 0.45;
+    return h > lim ? lim : h < -lim ? -lim : h;
   }
 
   /** Surface normal at a world position — for buoyant orientation. */
@@ -825,13 +864,37 @@ export class Water {
     const m = this._smpRipMask / (2 * e);
     out.x -= (hx1 - hx0) * m;
     out.z -= (hz1 - hz0) * m;
-    return out.normalize();
+    if (!Number.isFinite(out.x) || !Number.isFinite(out.y) || !Number.isFinite(out.z)
+        || out.lengthSq() < 1e-9) {
+      return out.set(0, 1, 0);
+    }
+    out.normalize();
+    if (out.y < 0.05) out.set(out.x, 0.05, out.z).normalize();
+    return out;
   }
 
   /** Still-water depth under a world position, metres (0 past the bank). */
   depthAt(x, z) {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return 0;
     this._sample(x, z);
     return this._smpDepth;
+  }
+
+  /**
+   * Signed still-water depth: positive in the channel, negative once the bed
+   * has climbed out of the water. The one definition of "where the shore is",
+   * shared with the shader and with terrain.js.
+   */
+  signedDepthAt(x, z) {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return 0;
+    this._v0.set(x, this.level, z);
+    this.river.toRiver(this._v0, this._coord);
+    return this.level - this.river.bedHeight(this._coord.s, this._coord.u);
+  }
+
+  /** Is there real water here? Cheap guard for anything that wants to float. */
+  isWaterAt(x, z, minDepth = 0.05) {
+    return this.signedDepthAt(x, z) > minDepth;
   }
 
   /**

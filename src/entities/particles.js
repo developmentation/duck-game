@@ -303,7 +303,7 @@ export class Particles {
           // thickness varies per bubble and thins as it rises (aSeed carries it)
           float phase = (1.25 + vSeed * 2.4) / ndv + vSeed * 5.1;
           vec3 film = 0.5 + 0.5 * cos(6.28318 * phase + vec3(0.0, 2.09, 4.19));
-          film = mix(vec3(dot(film, vec3(0.33))), film, 0.85);
+          film = mix(vec3(0.90, 0.94, 0.99), film, 0.34);
 
           vec3 H = normalize(uSunView + V);
           float spec = pow(max(dot(n, H), 0.0), 48.0);
@@ -855,7 +855,7 @@ export class Particles {
     }
     // foam ring on the surface + real water ripple
     this._sheetRing(x, y, z, 0.9 + st * 2.0, st * 0.8, null);
-    this._ripple(x, z, _clamp(0.05 + st * 0.14, 0.02, 0.3), 1.6 + st * 2.6);
+    if (st > 0.35) this._ripple(x, z, _clamp(0.03 + st * 0.08, 0.02, 0.16), 1.6 + st * 2.6);
     if (st > 0.55) {
       this.mistPuff(x, y + 0.25 + st * 0.2, z, 0.9 + st * 1.4, 0.10 + st * 0.07);
     }
@@ -871,10 +871,10 @@ export class Particles {
     const strength = o.strength ?? 1;
 
     // two staggered rings, the second delayed by a shorter start radius
-    const r1 = this._sheetRing(x, gy + 0.02, z, 1.5 * strength, 0.55, col);
+    const r1 = this._sheetRing(x, gy + 0.02, z, 1.5 * strength, 0.85, col);
     if (r1 >= 0) { this.sheets.life[r1] = 1.25; this.sheets.vy[r1] = 0.12; }
     const r2 = this._sheetRing(x, gy + 0.015, z, 2.6 * strength, 0.5, col);
-    if (r2 >= 0) { this.sheets.life[r2] = 1.7; this.sheets.vy[r2] = 0.02; this.sheets.a1[r2] = 0.32; }
+    if (r2 >= 0) { this.sheets.life[r2] = 1.7; this.sheets.vy[r2] = 0.02; this.sheets.a1[r2] = 0.42; }
 
     // rising motes so the tap has an unmistakable confirmation
     const rng = this.rng;
@@ -889,7 +889,7 @@ export class Particles {
       m.vx[idx] = Math.cos(a) * 0.25;
       m.vz[idx] = Math.sin(a) * 0.25;
     }
-    if (overWater) this._ripple(x, z, 0.09, 2.4);
+    if (overWater) this._ripple(x, z, 0.05, 2.4);
   }
 
   /* ──────────────────────────────────────────────────────────────── helpers ── */
@@ -1040,7 +1040,7 @@ export class Particles {
     if (!this.enabled || !this.bubbles) return;
     const d = Math.min(dt, 0.05);
     this._elapsed = elapsed;
-    this._ripBudget = 4;
+    this._ripBudget = 3;
 
     const ctx = this.ctx;
     const cam = ctx.engine?.camera;
@@ -1150,7 +1150,7 @@ export class Particles {
         this._v3.set(-r.dx, 0.8, -r.dz);
         this.sprayBurst(bx, surf + 0.05, bz, 2 + Math.round(inten * 3), inten * 0.7, this._v3);
         if (rng() < 0.25) this.mistPuff(bx, surf + 0.18 + rng() * 0.2, bz, 0.7 + inten, 0.10 + inten * 0.10);
-        if (rng() < 0.2) this._ripple(bx, bz, 0.03 + inten * 0.03, 1.0 + r.r);
+        if (rng() < 0.12) this._ripple(bx, bz, 0.02 + inten * 0.02, 1.0 + r.r);
       }
     }
 
@@ -1257,7 +1257,7 @@ export class Particles {
   }
 
   _popBubble(x, y, z, r) {
-    if (r > 0.014) this._ripple(x, z, 0.012 + r * 0.35, 0.30 + r * 9);
+    if (r > 0.030) this._ripple(x, z, 0.010 + r * 0.16, 0.30 + r * 9);
     if (r > 0.02) {
       const rng = this.rng;
       const count = 1 + Math.floor(r * 40);
@@ -1324,8 +1324,8 @@ export class Particles {
       if (d.vy[i] < 0 && d.py[i] < level + 0.6) {
         const surf = water?.heightAt ? water.heightAt(d.px[i], d.pz[i]) : level;
         if (d.py[i] <= surf) {
-          if (kind === D_DROP && d.size[i] > 0.022 && this.rng() < 0.25) {
-            this._ripple(d.px[i], d.pz[i], 0.016, 0.5);
+          if (kind === D_DROP && d.size[i] > 0.040 && this.rng() < 0.10) {
+            this._ripple(d.px[i], d.pz[i], 0.012, 0.5);
           }
           if (kind === D_DOWN) {
             // down lands and floats

@@ -399,6 +399,14 @@ void terrainSample() {
   // A noisy waterline: the shore must never be a ruled line.
   float wl = h - ( dMid.r - 0.5 ) * 0.22 * fadeMid - ( mB * 0.10 );
 
+  // Signed metres from the waterline — the SAME contour the water surface fades
+  // its alpha over (terrain.js bakes it from the same bed, world/water.js reads
+  // the same shoreU). Height alone is not enough: on the inside of a bend the
+  // bed sits at exactly the still level for up to eleven metres, so every
+  // height-keyed band saturated across the whole point bar and the shoreline
+  // came out as a wet-black sheet meeting a blown-white one.
+  float shoreM = vShoreDist + ( dMid.r - 0.5 ) * 0.85 + mB * 0.45 + mD * 0.12;
+
   // ── layers ──
   float depth = max( 0.0, -h );
   vec3 silt = mix( uSiltWet, uSiltDeep, smoothstep( 0.15, 3.2, depth ) );
@@ -445,9 +453,14 @@ void terrainSample() {
   rock *= 1.0 + 0.13 * mac;
 
   // ── masks ──
-  float siltM = 1.0 - smoothstep( -0.70, 0.14, wl );
+  // Silt only where there is actually water standing on it: below the line in
+  // height AND inside the waterline in plan.
+  float siltM = ( 1.0 - smoothstep( -0.70, 0.14, wl ) )
+              * ( 1.0 - smoothstep( -0.35, 0.55, shoreM ) );
   float sandM = ( 1.0 - smoothstep( 0.45, 2.30, wl ) ) * ( 1.0 - smoothstep( 0.34, 0.72, slope ) );
   sandM *= smoothstep( -1.6, -0.2, wl ) * 0.55 + 0.45;
+  sandM = max( sandM, ( 1.0 - smoothstep( 0.2, 5.0, abs( shoreM ) ) )
+                    * ( 1.0 - smoothstep( 0.34, 0.72, slope ) ) * 0.85 );
   // Cobbles hug the water: a shingle bank a few metres either side of the line.
   float cobbleBand = 1.0 - smoothstep( 0.7, 3.2, abs( wl ) );
   float cobblePatch = smoothstep( 0.26, 0.70, patchM * 0.80 + mA * 0.55 + 0.30 );
@@ -473,14 +486,29 @@ void terrainSample() {
   alb = mix( alb, silt, clamp( siltM, 0.0, 1.0 ) );
   rough = mix( rough, 0.46, clamp( siltM, 0.0, 1.0 ) );
 
-  // ── the wet band: ~0.5 m of darkened, glossy ground above the waterline ──
-  // This single detail is what makes the shoreline believable.
-  float wet = 1.0 - smoothstep( -0.06, 0.52, wl );
-  wet = max( wet, 1.0 - smoothstep( -0.30, 0.02, h ) );
-  wet = clamp( wet, 0.0, 1.0 );
-  alb *= mix( 1.0, 0.40, wet );
-  alb = mix( alb, alb * vec3( 0.78, 0.95, 1.05 ), wet * 0.65 );
+  // ── the shoreline: silt → wet → damp → dry, over ONE signed distance ──
+  // Everything here is driven by shoreM so it lines up with the water's own
+  // alpha ramp. Wet ground is dark and cool but never black: a crushed-black
+  // band next to a white foam band is exactly the read the shoreline had.
+  float wet = ( 1.0 - smoothstep( -0.15, 1.15, shoreM ) )
+            * ( 1.0 - smoothstep( 0.05, 0.95, wl ) );
+  wet = clamp( max( wet, ( 1.0 - smoothstep( -0.30, 0.05, h ) ) * 0.85 ), 0.0, 1.0 );
+  float damp = clamp( 1.0 - smoothstep( 0.6, 3.4, shoreM ), 0.0, 1.0 ) * ( 1.0 - wet );
+  alb *= mix( 1.0, 0.52, wet );
+  alb = mix( alb, alb * vec3( 0.74, 0.93, 1.06 ), wet * 0.62 );
+  alb *= mix( 1.0, 0.86, damp );
   rough = mix( rough, 0.38, wet * 0.92 );
+  rough = mix( rough, 0.66, damp * 0.7 );
+
+  // A soft scum line right on the water's edge. The water surface goes
+  // transparent over the last half metre, so without this the join is a colour
+  // step; with it the two sides share a bright band and read as one surface.
+  float lineN = dMid.a * 0.6 + dMac.g * 0.5 + mD * 0.25;
+  float scum = ( 1.0 - smoothstep( 0.0, 0.55, abs( shoreM - 0.10 ) ) )
+             * smoothstep( 0.30, 0.85, lineN + 0.22 );
+  alb = mix( alb, mix( uSand, vec3( 1.0, 0.97, 0.90 ), 0.45 ) * 0.62,
+             clamp( scum, 0.0, 1.0 ) * 0.55 );
+  rough = mix( rough, 0.88, clamp( scum, 0.0, 1.0 ) * 0.5 );
 
   // Broad value break-up at ~6 m and ~20 m, applied to every material. Without
   // this the banks read as smooth pillows however good the fine detail is.
@@ -524,7 +552,8 @@ void terrainSample() {
   // Submerged silt is smooth; leaving it bumpy under a low roughness gives a
   // field of glitter, which is instantly fake. The wet band above the line keeps
   // its relief, because that is what makes the shingle sparkle in a low sun.
-  float submerged = 1.0 - smoothstep( -0.28, 0.03, h );
+  float submerged = ( 1.0 - smoothstep( -0.28, 0.03, h ) )
+                  * ( 1.0 - smoothstep( -0.20, 0.45, shoreM ) );
   nd *= 1.0 - 0.72 * submerged;
 
   gAer = aer * 0.88;
@@ -590,10 +619,12 @@ export function createGroundMaterial({
     roughness: 0.9,
     metalness: 0.0,
     dithering: true,
-    // The bed meets the still-water plane exactly at the waterline, so bias the
-    // ground back in depth: the water surface wins every tie, no z-fighting.
+    // The bed meets the still-water plane exactly at the waterline — and on the
+    // inside of a bend it sits AT it for metres — so bias the ground back in
+    // depth: the water surface wins every tie, no z-fighting. A small slope
+    // factor keeps the push bounded when the beach is seen edge-on.
     polygonOffset: true,
-    polygonOffsetFactor: 1.0,
+    polygonOffsetFactor: 0.6,
     polygonOffsetUnits: 2.0,
   });
   mat.envMapIntensity = 0.8;

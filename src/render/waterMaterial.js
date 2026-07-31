@@ -420,9 +420,9 @@ const VERT = /* glsl */ `
 #define NR ${RIPPLE_SLOTS}
 precision highp float;
 
-attribute vec3 aSU;     // s along the river (m), u across (-1.06..1.06), metres from the waterline
+attribute vec3 aSU;     // s along the river (m), v across (-1.06..1.06), metres from the waterline
 attribute vec3 aFlow;   // downstream unit dir (xz) and speed (m/s)
-attribute float aDepth; // still-water depth (m)
+attribute float aDepth; // SIGNED still-water depth (m): < 0 once the bed is out of the water
 
 uniform float uTime;
 uniform float uLevel;
@@ -445,7 +445,7 @@ varying vec4 vClip;
 void main() {
   vec3 wp = (modelMatrix * vec4(position, 1.0)).xyz;
   vec2 fdir = normalize(aFlow.xy + vec2(1e-5, 0.0));
-  float amp = waterAmp(aDepth, aSU.y, aFlow.z);
+  float amp = waterAmp(max(aDepth, 0.0), aSU.y, aFlow.z);
 
   vec3 disp, nrm;
   waterWaves(wp.xz, uTime, fdir, aFlow.z, amp, disp, nrm);
@@ -613,11 +613,26 @@ void main() {
   float cosV = clamp(dot(Nf, V), 0.0, 1.0);
   float sceneZ = eyeDepth(uv);
   bool skyBehind = sceneZ > uFar * 0.85;
-  float analytic = min(vDepth / max(abs(V.y), 0.16), 26.0);
+  float stillDepth = max(vDepth, 0.0);
+  float analytic = min(stillDepth / max(abs(V.y), 0.16), 26.0);
   float ssThick = min(max(0.0, sceneZ - vViewZ) * vRayK, 26.0);
   float ssW = smoothstep(0.05, 0.26, cosV) * (1.0 - smoothstep(30.0, 80.0, vViewZ));
   if (skyBehind) ssW = 0.0;
   float thick = mix(analytic, ssThick, ssW);
+
+  // ---- one definition of where the shore is ----------------------------
+  // vDepth is the SIGNED still-water depth baked from the same river bed the
+  // ground ribbon is built from, and vSU.z is metres back from that same
+  // waterline. The alpha ramp, the wet band and the foam all key off these two,
+  // so the water's edge is an analytic contour of a smooth interpolated value
+  // rather than the intersection of two coarse meshes — which is what used to
+  // stair-step. geoDepth is a safety net only: where the ground ribbon's own
+  // linear interpolation dips below the still level between its columns, the
+  // rendered depth rescues the alpha so no unwatered wedge can open up.
+  float bankM = vSU.z;
+  float geoDepth = min(ssThick * abs(V.y), 0.7) * ssW;
+  float shoreA = smoothstep(0.0, 0.60, bankM) * smoothstep(0.006, 0.05, vDepth);
+  float shoreAlpha = max(shoreA, smoothstep(0.05, 0.24, geoDepth));
 
   // ---- refraction ------------------------------------------------------
   float bend = uRefract * min(thick, 4.0) / max(1.0, vViewZ * 0.55);
@@ -697,24 +712,26 @@ void main() {
   // ripple rings. All dissolved through a drifting cloud mask so the waterline
   // is never a drawn white line.
   float shoreT = ssThick;
-  float bankM = vSU.z;
   // Flat-topped: full strength for the first metre or so of water, then out.
-  // A plain falloff from the waterline gives a band only centimetres wide,
-  // because the bed feathers to the still level over the last few percent of u.
-  float shoreBand = 1.0 - smoothstep(0.35, 3.3, max(bankM, 0.0));
+  // It has to be measured from the REAL waterline: on a bend |u| = 1 can be
+  // eleven metres out on a dry bar, and keying the band off it is what painted
+  // a saturated white sheet across the whole point bar.
+  float shoreBand = 1.0 - smoothstep(0.25, 2.9, max(bankM, 0.0));
   // Contact foam is for ducks, rocks and the last inches of the beach. Viewed
   // edge-on, deep water an inch in front of a far bank also reports a thin
   // column, so gate it on the real depth and on distance or the whole middle
   // distance bands over with false foam.
   float contact = (1.0 - smoothstep(0.06, 0.55, shoreT))
-                * smoothstep(2.2, 0.5, vDepth) * ssW;
+                * smoothstep(2.2, 0.5, stillDepth) * ssW;
   float wet = max(shoreBand, contact * 0.95);
   float wob = 0.11 * sin(vWorld.x * 1.6 + uTime * 1.15) + 0.11 * sin(vWorld.z * 2.0 - uTime * 1.55);
   float fnA = flowAlpha(uWaveA, vWorld.xz * 0.13, fdir, fspeed * 0.55, 3.4);
   float fnB = texture2D(uWaveB, vWorld.xz * 0.55 + fdir * (-uTime * fspeed * 0.42)).a;
   float foamNoise = fnA * 0.75 + fnB * 0.45;
-  float shoreFoam = smoothstep(0.52, 1.0,
-      wet * 0.78 + foamNoise * 0.62 + wob * 0.34 + vWaveH * 1.6);
+  // Deliberately never reaches 1: a solid uFoamColor sheet against a low sun is
+  // a blown highlight, and it was the brightest thing in the frame.
+  float shoreFoam = smoothstep(0.46, 1.12,
+      wet * 0.70 + foamNoise * 0.66 + wob * 0.36 + vWaveH * 1.6);
 
   // streaks in the fast shallow water and downstream of anything solid
   vec2 sUV = vec2(dot(vWorld.xz, fdir) * 0.055 - uTime * fspeed * 0.055,
@@ -726,8 +743,9 @@ void main() {
                * max(fastMask, obstruct * 0.8);
 
   float ripFoam = smoothstep(0.20, 0.80, rfoam * (0.5 + 0.85 * foamNoise));
-  float foam = clamp(max(max(shoreFoam, streak * 0.8), ripFoam) * uFoamAmount, 0.0, 1.0);
-  foam *= 1.0 - smoothstep(1.0, 1.055, abs(vSU.y));
+  float foam = clamp(max(max(shoreFoam, streak * 0.8), ripFoam) * uFoamAmount, 0.0, 0.92);
+  // Foam only exists where there is water under it.
+  foam *= shoreAlpha;
 
   // ---- specular: the sun glitter track ---------------------------------
   vec3 H = normalize(uSunDir + V);
@@ -758,7 +776,9 @@ void main() {
     col = mix(col, uFoamColor * lightIn, foam * 0.5);
   } else {
     col = mix(water, refl, F);
-    col = mix(col, uFoamColor * (lightIn * 0.85 + sunLit * 0.55), foam);
+    // Foam is scattered water, not a light source: it takes the ambient it sits
+    // in with a touch of sun, and the wet band underneath keeps showing through.
+    col = mix(col, uFoamColor * (lightIn * 0.62 + sunLit * 0.34), foam);
     col += specular;
   }
 
@@ -768,7 +788,8 @@ void main() {
     else if (uDebug < 2.5) col = vec3(pathThick / 6.0);
     else if (uDebug < 3.5) col = vec3(clamp(bankM / 4.0, 0.0, 1.0));
     else if (uDebug < 4.5) col = vec3(F);
-    else col = Nf * 0.5 + 0.5;
+    else if (uDebug < 5.5) col = Nf * 0.5 + 0.5;
+    else col = vec3(shoreAlpha);
     gl_FragColor = vec4(col, 1.0);
     return;
   }
@@ -777,14 +798,15 @@ void main() {
   float fogF = 1.0 - exp(-uFogDensity * uFogDensity * vViewZ * vViewZ);
   col = mix(col, uFogColor, clamp(fogF, 0.0, 1.0));
 
-  // Fade the very outer skirt so the water never draws a hard line on the beach
-  float edge = 1.0 - smoothstep(1.0, 1.055, abs(vSU.y));
-  // Opaque everywhere except the last hand's width of the waterline. Any real
-  // translucency further out lets the far bank's big flat triangles show
-  // through as pale polygonal patches lying on top of the river.
-  float alpha = below ? 1.0
-    : clamp(0.55 + max(bankM, 0.0) * 1.8 + pathThick * 1.2, 0.0, 1.0);
-  gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0) * edge);
+  // Opaque everywhere there is real water — any translucency out in the channel
+  // lets the far bank's big flat triangles show through as pale polygonal
+  // patches lying on the river — and a soft ramp to nothing over the last half
+  // metre of the shore, on the same signed depth the ground shades its wet band
+  // with. The outer skirt fade is a belt-and-braces cut for the overlap that
+  // runs under the beach.
+  float edge = 1.0 - smoothstep(1.0, 1.05, abs(vSU.y));
+  float alpha = (below ? max(shoreAlpha, 0.9) : shoreAlpha) * edge;
+  gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
 }
 `;
 
@@ -856,9 +878,11 @@ export function createWaterMaterial({
     depthTest: true,
     side: THREE.DoubleSide,
     fog: false,
-    polygonOffset: true,
-    polygonOffsetFactor: 1.0,
-    polygonOffsetUnits: 1.0,
+    // No offset of its own: the ground is the surface that gets pushed back, so
+    // the water wins every tie. Offsetting the water too made its (very large)
+    // depth slope at grazing angles push it behind the beach in patches, which
+    // is half of where the shoreline's dark wedges came from.
+    polygonOffset: false,
   });
   mat.name = 'WaterSurface';
   mat.userData.uniforms = uniforms;

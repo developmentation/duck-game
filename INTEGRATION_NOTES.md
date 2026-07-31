@@ -208,3 +208,70 @@ Requests for other owners:
   `terrain.surfaceHeightAt()`; `river.bedHeight()` plus that rock index is
   what the family stands on. A real `surfaceHeightAt(x, z)` that includes the
   boulder instances would let me drop ~40 lines.
+
+---
+
+## particles (`src/entities/particles.js`)
+
+What I publish on `ctx.particles` / `ctx.get('particles')`:
+
+```js
+particles.emit(kind, positionOrOptions, options)
+//  'bubbles'|'bubble'  { count, spread, size, rise }
+//  'splash'            { strength, dir }        crown + curtain + spray + foam ring
+//  'droplets'          { count, strength, spread }
+//  'spray'             { count, strength, dir }
+//  'mist'              { radius, amount }
+//  'dust'              { count }
+//  'down'|'feather'    { count, spread }
+//  'marker'            { color, strength }      REQUIRED nav confirmation
+//  'ring'|'foam'       { radius, strength }
+particles.counts        // { bubbles, droplets, motes, sheets }
+particles.wind(pos,out) // vegetation.wind() when it exists, local breeze otherwise
+particles.enabled       // set false to mute every effect
+```
+
+Position may be a `Vector3`, a `{x,y,z}` literal, or `{ position, ... }`.
+I listen for `SPLASH`, `BUBBLES`, `DIVE`, `SURFACE`, `FISH_CAUGHT`, and for
+`SFX { name:'wingbeat'|'preen' }` (feather down). I also chain onto
+`player.duck.onSpray` the first frame the player exists — the previous handler
+is still called.
+
+Cost: **4 draw calls, ~300 triangles** in the main pass (bubbles / droplets /
+motes are `Points`, all the sheets are one instanced quad mesh). Everything is
+on layer 11 (`NO_REFLECT_LAYER`) so the planar reflection skips it, every
+material is `transparent + depthWrite:false` so postfx's g-buffer drops it, and
+nothing casts a shadow. Only the water's refraction traversal draws it a second
+time (+4 calls).
+
+Requests / findings for other owners:
+
+* **water — the ripple decal is currently rendering as hard white polygons.**
+  With `water.addRipple()` stubbed out my markers and splashes look correct;
+  with it live, every ripple site becomes a cluster of flat, hard-edged white
+  quads that blow out the frame (see `shots/particles6/01-dawn-mist-splash.png`
+  versus `shots/particles6/iso-marker-noripple.png`, which is the same setup
+  with `addRipple` monkey-patched to a no-op). I have cut my ripple usage to at
+  most 3 per frame and only for real events, but the decal itself needs a look.
+* **tools/screenshot.mjs — `requestAnimationFrame` is effectively frozen in the
+  headless capture.** `game.time.frame` reaches ~5 and then stops advancing;
+  `settle` waits do not simulate anything, so every capture is "five frames
+  after boot". Anything transient (particles, wakes, animation blends, fish
+  behaviour) is therefore invisible in the default shots even when it works.
+  Timers still fire, so a shot can drive the loop itself:
+
+  ```js
+  setInterval(function(){ try { window.game._loop(); } catch (e) {} }, 40);
+  ```
+
+  `tools/shots/particles.json` does exactly that. It would be worth doing in
+  the harness itself (drive N frames, then grab) so every agent's transient
+  work is actually captured.
+* **anyone writing GLSL for this target**: reversed-edge `smoothstep(hi, lo, x)`
+  returns 1.0 on the SwiftShader GL used for capture, so radial masks written
+  that way fill the whole quad. Write `1.0 - smoothstep(lo, hi, x)`.
+* **InstancedBufferGeometry**: a `uv` attribute shared from a `PlaneGeometry`
+  came through constant on this driver; deriving uv from `position.xy + 0.5`
+  fixed it. Worth knowing if another system instances quads.
+* **duckPlayer**: I implement `emit('marker', {x,y,z})` — call it on tap-to-move
+  and the tap gets a warm expanding ring plus rising motes.
