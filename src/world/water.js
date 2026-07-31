@@ -40,9 +40,10 @@ import {
   createWaterMaterial, makeWaterTextures, evalWaves, evalRipples,
   waterAmpJS, RIPPLE_SLOTS,
 } from '../render/waterMaterial.js';
+import { shoreU } from './terrain.js';
 
-const U_MAX = 1.055;          // ribbon overlaps into the bank
-const SKIRT_DROP = 0.07;      // metres the outer skirt sits below still water
+const V_MAX = 1.06;           // ribbon overlaps past the waterline, in v
+const SKIRT_DROP = 0.13;      // metres the overlap sits below still water
 const RIPPLE_LIFE = 2.6;      // seconds a ripple source stays live
 
 function detectSoftware(renderer) {
@@ -197,12 +198,18 @@ export class Water {
   // geometry
   // ─────────────────────────────────────────────────────────────────────────
 
-  /** Column table across the channel: denser near the banks for the foam band. */
+  /**
+   * Column table across the channel, in the NORMALISED cross parameter v that
+   * terrain.js's ribbon also uses: v = ±1 is the waterline for this station,
+   * wherever the bend has put it. Densest at the shore, because that is where
+   * the alpha ramp and the foam band live.
+   */
   _buildColumns() {
     const half = [];
-    for (let a = 0; a < 0.775; a += 0.055) half.push(a);
-    for (let a = 0.78; a < 0.985; a += 0.022) half.push(a);
-    half.push(0.995, 1.0, 1.018, 1.036, U_MAX);
+    for (let a = 0; a < 0.735; a += 0.052) half.push(a);
+    for (let a = 0.735; a < 0.935; a += 0.025) half.push(a);
+    half.push(0.94, 0.952, 0.963, 0.972, 0.980, 0.9865, 0.9915, 0.9955, 0.9985,
+      1.0, 1.012, 1.03, V_MAX);
     const cols = [];
     for (let i = half.length - 1; i >= 1; i--) cols.push(-half[i]);
     for (let i = 0; i < half.length; i++) cols.push(half[i]);

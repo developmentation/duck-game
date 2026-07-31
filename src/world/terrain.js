@@ -56,9 +56,12 @@ const BANK = 1;    // cross-section column addressed by metres inland
 // different level are stitched with triangle fans, so the mesh stays watertight
 // while the far ground costs almost nothing — and, critically, distant rows are
 // far enough apart that they stop z-fighting each other at grazing angles.
+// NORMALISED cross parameter, not u: 1.0 is the waterline for this station,
+// wherever shoreU() puts it. Weighted toward the outer end because that is
+// where the bed does all its work — a 2 m drop inside the last metre.
 const CHANNEL_U = [
-  0, 0.08, 0.16, 0.25, 0.34, 0.43, 0.52, 0.60, 0.68, 0.75,
-  0.81, 0.86, 0.90, 0.93, 0.955, 0.972, 0.984, 0.992, 0.997, 1.0,
+  0, 0.09, 0.18, 0.27, 0.36, 0.45, 0.53, 0.61, 0.685, 0.755,
+  0.815, 0.865, 0.905, 0.938, 0.962, 0.978, 0.988, 0.9945, 0.9985, 1.0,
 ];
 const BANK_SPEC = [
   // [metres inland, row stride level]
@@ -83,6 +86,70 @@ const MAX_LEVEL = 16;
 const S_OVERRUN = 150;    // ribbon continues past both ends of the river
 const CHUNK_ROWS = 48;    // must be a multiple of MAX_LEVEL
 const CHUNKS = 24;
+
+// ── the shoreline, shared with world/water.js ──────────────────────────────
+//
+// `river.depth` clamps a skewed cross-channel profile, so on a bend the bed
+// reaches the still level well INSIDE |u| = 1 — measured, as early as |u| = 0.28,
+// which leaves up to 11 m of the nominal channel as a dry point bar sitting at
+// exactly WATER_LEVEL. Nothing used to know that: the ground ribbon put all its
+// resolution at |u| = 1 (so the real shelf, a 2 m drop over a metre, was
+// resolved by columns 1.1 m apart and undershot the true bed by up to 1.14 m),
+// and the water ribbon painted opaque water and blown-out shore foam across the
+// whole bar, coplanar with the ground. That is the jagged waterline: a
+// z-fighting patchwork of bright foam and dark silt with wedges of unwatered
+// bed hanging off it.
+//
+// Both ribbons now scale their cross-section by this one function, so their
+// waterlines are the same curve by construction rather than by coincidence.
+// It lives here because terrain owns the bed; water.js imports it.
+
+const _shoreCache = new WeakMap();
+const SHORE_STEP = 1.0;   // metres along s between solved samples
+
+function solveShore(river, s, side) {
+  // depth() is monotone in |u| (its noise factor is strictly positive), so a
+  // plain bisection on "is there any water here" finds the waterline exactly.
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 18; i++) {
+    const m = (lo + hi) * 0.5;
+    if (river.depth(s, side * m) > 1e-7) lo = m; else hi = m;
+  }
+  return Math.min(1, Math.max(0.12, hi));
+}
+
+/** Cached table of the waterline |u| for both banks, sampled every metre. */
+export function shoreProfile(river) {
+  let c = _shoreCache.get(river);
+  if (c) return c;
+  const n = Math.ceil(river.length / SHORE_STEP) + 2;
+  const L = new Float32Array(n);
+  const R = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const s = Math.min(river.length, i * SHORE_STEP);
+    L[i] = solveShore(river, s, -1);
+    R[i] = solveShore(river, s, 1);
+  }
+  c = { step: SHORE_STEP, n, L, R };
+  _shoreCache.set(river, c);
+  return c;
+}
+
+/**
+ * |u| of the waterline at station `s` on `side` (-1 or +1), in (0.12 … 1].
+ * Linear between the metre samples — which also takes the worst of the jitter
+ * out of `curvature()`, whose 1 m lookup table makes the raw edge a staircase.
+ */
+export function shoreU(river, s, side) {
+  const c = shoreProfile(river);
+  let f = s / c.step;
+  if (!(f > 0)) f = 0; else if (f > c.n - 1) f = c.n - 1;
+  const i = f | 0;
+  const j = Math.min(c.n - 1, i + 1);
+  const t = f - i;
+  const a = side < 0 ? c.L : c.R;
+  return a[i] + (a[j] - a[i]) * t;
+}
 
 export class Terrain {
   constructor(ctx) {
@@ -208,15 +275,23 @@ export class Terrain {
     return t * Math.max(0, big);
   }
 
-  /** World position (and river coords) of one cross-section sample. */
-  _sample(s, col, out) {
+  /**
+   * World position (and river coords) of one cross-section sample.
+   *
+   * `edgeL` / `edgeR` are this station's waterline |u| (see shoreU). Channel
+   * columns are a NORMALISED cross parameter now: v = 1 lands exactly on the
+   * waterline whatever the bend is doing, so the dense outer columns always sit
+   * on the shelf instead of metres out on a dry bar.
+   */
+  _sample(s, col, out, edgeL = 1, edgeR = 1) {
     const river = this.river;
     const L = river.length;
     const sc = THREE.MathUtils.clamp(s, 0, L);
     const hw = river.halfWidth(sc);
+    const edge = col.v < 0 ? edgeL : edgeR;
 
     let u;
-    if (col.kind === CHANNEL) u = col.v;
+    if (col.kind === CHANNEL) u = col.v * edge;
     else u = Math.sign(col.v) * (1 + Math.abs(col.v) / hw);
 
     let y = col.kind === CHANNEL ? river.bedHeight(sc, u) : river.bankHeight(sc, u);
@@ -237,13 +312,17 @@ export class Terrain {
     } else {
       river.toWorld(sc, u, y, out);
     }
-    return { u, y, hw };
+    return { u, y, hw, edge };
   }
 
-  /** Signed distance from the waterline in metres: negative inside the channel. */
-  _shoreDist(col, hw) {
-    if (col.kind === CHANNEL) return -(1 - Math.abs(col.v)) * hw;
-    return Math.abs(col.v);
+  /**
+   * Signed distance from the waterline in metres, negative inside the channel.
+   * Measured from the REAL waterline (edge·hw), not from |u| = 1, which on a
+   * bend can be eleven metres of dry bar away from any water.
+   */
+  _shoreDist(col, info) {
+    if (col.kind === CHANNEL) return (Math.abs(info.u) - info.edge) * info.hw;
+    return Math.abs(col.v) + (1 - info.edge) * info.hw;
   }
 
   // ── ribbon ───────────────────────────────────────────────────────────────
@@ -281,14 +360,18 @@ export class Terrain {
     const ter = new Float32Array(N * 3);
     const p = this._v0;
 
+    const river = this.river;
     for (let r = 0; r < rows; r++) {
       const s = sMin + r * sStep;
+      const sc = THREE.MathUtils.clamp(s, 0, river.length);
+      const edgeL = shoreU(river, sc, -1);
+      const edgeR = shoreU(river, sc, 1);
       for (let c = 0; c < W; c++) {
         const col = cols[c];
-        const info = this._sample(s, col, p);
+        const info = this._sample(s, col, p, edgeL, edgeR);
         const i = (r * W + c) * 3;
         pos[i] = p.x; pos[i + 1] = p.y; pos[i + 2] = p.z;
-        ter[i] = this._shoreDist(col, info.hw);
+        ter[i] = this._shoreDist(col, info);
         ter[i + 2] = info.u;
       }
     }
