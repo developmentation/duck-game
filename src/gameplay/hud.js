@@ -412,6 +412,9 @@ export class HUD {
     els.lBody.textContent = p.body || '';
     els.lesson.classList.add('show');
     this._lessonT = 15;
+    // The corner is the lesson's now.
+    this._hintT = 0;
+    els.hint.classList.add('gone');
   }
 
   _hideLesson() {
@@ -585,7 +588,8 @@ export class HUD {
     const nx = dx / len;
     const nz = dz / len;
     const dot = nx * this._camFwd.x + nz * this._camFwd.z;
-    const cross = this._camFwd.z * nx - this._camFwd.x * nz;
+    // + when the target is to screen-right: right = (-fwd.z, 0, fwd.x).
+    const cross = this._camFwd.x * nz - this._camFwd.z * nx;
     const deg = Math.atan2(cross, dot) * 57.2957795;
     setRotate(el, deg);
   }

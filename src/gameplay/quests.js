@@ -306,7 +306,9 @@ export class Quests {
 
     this._bindPointer();
     this._wrapInput();
-    this._openCurrent();
+    // The HUD boots after us, so opening the first objective right here would
+    // fire its hint into an empty room. Let the first frame do it.
+    this._openDelay = 0.5;
   }
 
   /* ───────────────────────────── persistence ──────────────────────────── */

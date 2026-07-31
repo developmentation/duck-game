@@ -247,6 +247,8 @@ export class Minigames {
         case 'follow-leader': this._tickLeader(dt, p, run); break;
         default: break;
       }
+      // A tick may have ended the run (out of breath, lost the line).
+      if (!this.active) { this.offer = null; return; }
       this.active.score = Math.max(0, Math.round(this._score));
       this.active.label = this._label;
       if (run && this.active.timeLeft <= 0) this.stop('time');

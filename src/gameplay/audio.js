@@ -486,9 +486,13 @@ export class Audio {
       const pan = ac.createPanner();
       pan.panningModel = 'equalpower';
       pan.distanceModel = 'inverse';
-      pan.refDistance = 3.2;
-      pan.maxDistance = 180;
-      pan.rolloffFactor = 1.1;
+      // Matched to the camera: the rig sits 4–8 m back, so refDistance is just
+      // inside that and the curve is gentle — an inverse rolloff of 1 would put
+      // a bird on the far bank 25 dB down and effectively delete the world.
+      // Ambient wildlife passes its own, gentler rolloff.
+      pan.refDistance = opts.ref || 4;
+      pan.maxDistance = 200;
+      pan.rolloffFactor = opts.rolloff || 0.75;
       if (pan.positionX) {
         pan.positionX.value = p.x; pan.positionY.value = p.y; pan.positionZ.value = p.z;
       } else if (pan.setPosition) {
@@ -660,16 +664,15 @@ export class Audio {
   }
 
   /** A single plucked note: soft attack, long dark tail, plenty of reverb. */
-  _pluck(t, freq, level = 0.1) {
-    const ac = this.ac;
+  _pluck(t, freq, level = 0.1, out = null) {
     const g = this._gain(0.0001);
     const body = this._filter('lowpass', 1400 + this.rand() * 900, 0.9);
     const a = this._osc('triangle', freq, t);
     const b = this._osc('sine', freq * 2.002, t);
     const bg = this._gain(0.22);
     a.connect(g); b.connect(bg).connect(g);
-    g.connect(body).connect(this.musicBus);
-    const send = this._gain(0.55);
+    g.connect(body).connect(out || this.musicBus);
+    const send = this._gain(out ? 0 : 0.55);
     body.connect(send).connect(this.reverbSend);
     const dur = 1.6 + this.rand() * 2.4;
     this._env(g.gain, t, level, 0.012, dur);
@@ -718,7 +721,7 @@ export class Audio {
 
   _scheduleAmbientEvents(t) {
     const tod = clamp(this.ctx.settings?.timeOfDay ?? 0.3, 0, 1);
-    const night = clamp(1 - Math.min(Math.abs(tod - 0.5) / 0.34, 1), 0, 1); // 1 at midday
+    const midday = clamp(1 - Math.min(Math.abs(tod - 0.5) / 0.34, 1), 0, 1); // 1 at noon
     const dusk = Math.exp(-Math.pow((tod - 0.78) / 0.1, 2)) + Math.exp(-Math.pow((tod - 0.2) / 0.09, 2));
 
     if (t >= this._nextBird) {
@@ -735,7 +738,7 @@ export class Audio {
 
     if (t >= this._nextFrog) {
       this._nextFrog = t + 9 + this.rand() * 22;
-      if ((dusk > 0.2 || night < 0.35) && this.waterProximity > 0.4 && this.underwater < 0.4) {
+      if ((dusk > 0.2 || midday < 0.35) && this.waterProximity > 0.4 && this.underwater < 0.4) {
         this._frog(t);
       }
     }
@@ -773,7 +776,7 @@ export class Audio {
     const far = clamp(dist / 40, 0, 1);
     // voice → distance tone → panner chain. Far birds lose their top end,
     // which is most of what makes a wood matter feel deep.
-    const dest = this._dest({ position: p }, 0.42 + far * 0.3);
+    const dest = this._dest({ position: p, ref: 8, rolloff: 0.35 }, 0.42 + far * 0.3);
     const tone = this._filter('lowpass', lerp(9000, 3200, far), 0.7);
     const voice = this._gain(1);
     voice.connect(tone).connect(dest);
@@ -883,7 +886,7 @@ export class Audio {
     const ang = this.rand() * Math.PI * 2;
     const d = 4 + this.rand() * 14;
     this._pos.set(this._listenerX + Math.cos(ang) * d, this.listenerY + 0.3, this._listenerZ + Math.sin(ang) * d);
-    const dest = this._dest({ position: this._pos }, 0.15);
+    const dest = this._dest({ position: this._pos, ref: 6, rolloff: 0.5 }, 0.15);
     const bp = this._filter('bandpass', 4200 + this.rand() * 1800, 14);
     const g = this._gain(0.0001);
     const src = this._noise('white', t, 0.5);
@@ -907,31 +910,29 @@ export class Audio {
     const ang = this.rand() * Math.PI * 2;
     const d = 8 + this.rand() * 22;
     this._pos.set(this._listenerX + Math.cos(ang) * d, this.listenerY + 0.05, this._listenerZ + Math.sin(ang) * d);
-    const dest = this._dest({ position: this._pos }, 0.4);
+    const dest = this._dest({ position: this._pos, ref: 9, rolloff: 0.4 }, 0.4);
     const f = 90 + this.rand() * 60;
     const o = this._osc('sawtooth', f, t);
     const g = this._gain(0.0001);
     const bp = this._filter('bandpass', 520 + this.rand() * 260, 4);
-    const trem = this._osc('square', 22 + this.rand() * 14, t);
-    const tg = this._gain(0.5);
-    trem.connect(tg).connect(g.gain);
-    o.connect(g).connect(bp).connect(dest);
+    const tr = this._trem(22 + this.rand() * 14, 0.5, t);
+    o.connect(g).connect(tr.mul).connect(bp).connect(dest);
     let end = t;
     const croaks = 1 + Math.floor(this.rand() * 3);
     for (let i = 0; i < croaks; i++) {
       const nt = t + i * (0.36 + this.rand() * 0.2);
       end = this._env(g.gain, nt, 0.13, 0.02, 0.16, 0.08);
     }
-    o.start(t); trem.start(t);
-    o.stop(end + 0.05); trem.stop(end + 0.05);
-    this._retire(end + 0.3, o, trem, tg, g, bp, dest);
+    o.start(t); tr.lfo.start(t);
+    o.stop(end + 0.05); tr.lfo.stop(end + 0.05);
+    this._retire(end + 0.3, o, tr.lfo, tr.d, tr.mul, g, bp, dest);
   }
 
   _woodpecker(t) {
     const ang = this.rand() * Math.PI * 2;
     const d = 25 + this.rand() * 40;
     this._pos.set(this._listenerX + Math.cos(ang) * d, this.listenerY + 6 + this.rand() * 6, this._listenerZ + Math.sin(ang) * d);
-    const dest = this._dest({ position: this._pos }, 0.65);
+    const dest = this._dest({ position: this._pos, ref: 14, rolloff: 0.25 }, 0.65);
     const lp = this._filter('lowpass', 2600, 0.8);
     const g = this._gain(0.0001);
     const src = this._noise('white', t, 0.9);
@@ -1105,18 +1106,16 @@ export class Audio {
     const sg = this._gain(0.0001);
     const sf = this._filter('bandpass', 900, 0.9);
     const ssrc = this._noise('white', t + 0.18, 0.5);
-    ssrc.connect(sg).connect(sf).connect(dest);
-    const flut = this._osc('square', 17 + this.rand() * 6, t);
-    const fg = this._gain(0.55);
-    flut.connect(fg).connect(sg.gain);
+    const tr = this._trem(17 + this.rand() * 6, 0.55, t + 0.18);
+    ssrc.connect(sg).connect(tr.mul).connect(sf).connect(dest);
     const shakeEnd = this._env(sg.gain, t + 0.18, 0.16 * vol, 0.03, 0.3, 0.1);
-    flut.start(t + 0.18); flut.stop(shakeEnd + 0.05);
+    tr.lfo.start(t + 0.18); tr.lfo.stop(shakeEnd + 0.05);
     ssrc.stop(shakeEnd + 0.1);
     end = Math.max(end, shakeEnd);
     for (let i = 0; i < 8; i++) {
       end = Math.max(end, this._drop(dest, t + 0.2 + this.rand() * 0.45, 0.05 * vol * (0.5 + this.rand())));
     }
-    this._retire(end + 0.4, src, g, bp, ssrc, sg, sf, flut, fg, dest);
+    this._retire(end + 0.4, src, g, bp, ssrc, sg, sf, tr.lfo, tr.d, tr.mul, dest);
     this._bump(0.22);
     return true;
   }
@@ -1186,15 +1185,12 @@ export class Audio {
     const f2 = this._filter('bandpass', 1180 * rate, 8);
     const f3 = this._filter('bandpass', 2500 * rate, 7);
     const g1 = this._gain(1.0), g2 = this._gain(0.55), g3 = this._gain(0.22);
-    larynx.connect(amp);
-    amp.connect(f1).connect(g1).connect(dest);
-    amp.connect(f2).connect(g2).connect(dest);
-    amp.connect(f3).connect(g3).connect(dest);
-
-    // The rasp: a fast tremolo riding the amplitude.
-    const rasp = this._osc('square', 58 + this.rand() * 16, t);
-    const rg = this._gain(0.16);
-    rasp.connect(rg).connect(amp.gain);
+    // The rasp: a fast tremolo after the envelope, so silence stays silent.
+    const tr = this._trem(58 + this.rand() * 16, 0.16, t);
+    larynx.connect(amp).connect(tr.mul);
+    tr.mul.connect(f1).connect(g1).connect(dest);
+    tr.mul.connect(f2).connect(g2).connect(dest);
+    tr.mul.connect(f3).connect(g3).connect(dest);
 
     let end = t;
     for (let i = 0; i < syllables; i++) {
@@ -1211,11 +1207,11 @@ export class Audio {
       f1.frequency.linearRampToValueAtTime(640 * rate, st + dur);
       end = this._env(amp.gain, st, lvl, 0.009, dur * 0.72, dur * 0.28);
     }
-    saw.start(t); saw2.start(t); rasp.start(t);
-    saw.stop(end + 0.05); saw2.stop(end + 0.05); rasp.stop(end + 0.05);
+    saw.start(t); saw2.start(t); tr.lfo.start(t);
+    saw.stop(end + 0.05); saw2.stop(end + 0.05); tr.lfo.stop(end + 0.05);
     breath.stop(end + 0.05);
     this._retire(end + 0.4, saw, saw2, s2g, breath, bg, bhp, larynx, amp,
-      f1, f2, f3, g1, g2, g3, rasp, rg, dest);
+      f1, f2, f3, g1, g2, g3, tr.lfo, tr.d, tr.mul, dest);
     this._bump(0.16);
     return true;
   }
@@ -1406,8 +1402,9 @@ export class Audio {
   _vChime(t, o, vol) {
     const root = this._root || ROOTS[0];
     const start = 5 + Math.floor(this.rand() * 2);
+    const out = o && o.silent ? this.testBus : null;
     for (let i = 0; i < 3; i++) {
-      this._pluck(t + i * 0.13, scaleNote(root, start + i * 2) * 4, 0.1 * vol);
+      this._pluck(t + i * 0.13, scaleNote(root, start + i * 2) * 4, 0.1 * vol, out);
     }
     this._bump(0.45);
     return true;
@@ -1449,10 +1446,25 @@ export class Audio {
     on(EVENTS.SHAKE, (p) => this._bump(clamp((p?.strength || 0) * 0.5, 0, 0.5)));
   }
 
+  /**
+   * DIVE / SURFACE / QUACK are emitted *before* the matching SFX event by both
+   * the player and the family, and the SFX payload is the richer one (it
+   * carries `rate`, which is what tells a duckling peep from a drake). So park
+   * the bare event for a frame and only voice it if no SFX arrived.
+   */
   _ifNotAlready(name, p, vol, pitch) {
-    const t = this._now();
-    if (t - (this._lastEvent[name] || -1) < 0.12) return;
-    this.play(name, { position: p && p.position, volume: vol, rate: pitch || 1 });
+    this._deferred[name] = { position: p && p.position, volume: vol, rate: pitch || 1 };
+  }
+
+  _flushDeferred(t) {
+    for (let i = 0; i < DEFERRED.length; i++) {
+      const name = DEFERRED[i];
+      const d = this._deferred[name];
+      if (!d) continue;
+      this._deferred[name] = null;
+      if (t - (this._lastEvent[name] || -1) < 0.25) continue;   // SFX covered it
+      this.play(name, d);
+    }
   }
 
   /** Nudge the music's sense that something is happening. */
@@ -1504,13 +1516,18 @@ export class Audio {
     this._scheduleAmbientEvents(t);
     this._scheduleMusic(t);
 
-    // Music intensity decays back toward silence.
+    // Music intensity decays back toward silence. The bus level only needs
+    // touching a few times a second — it glides over seconds anyway.
     this.intensity *= Math.exp(-dt / 9);
-    if (this.musicEnabled) {
-      const target = (0.05 + 0.13 * clamp(this.intensity, 0, 1)) * (1 - 0.4 * this.underwater);
-      this.musicBus.gain.setTargetAtTime(target, t, 2.2);
-    } else {
-      this.musicBus.gain.setTargetAtTime(0.0001, t, 0.8);
+    this._musicAcc += dt;
+    if (this._musicAcc >= 0.25) {
+      this._musicAcc = 0;
+      if (this.musicEnabled) {
+        const target = (0.05 + 0.13 * clamp(this.intensity, 0, 1)) * (1 - 0.4 * this.underwater);
+        this.musicBus.gain.setTargetAtTime(target, t, 2.2);
+      } else {
+        this.musicBus.gain.setTargetAtTime(0.0001, t, 0.8);
+      }
     }
   }
 
@@ -1590,6 +1607,7 @@ export class Audio {
         near = clamp(1 - Math.sqrt(best) / 16, 0, 1);
       }
       this.rockNear = near;
+      this.roughness = rough;
 
       // Off the water entirely? The river recedes behind you.
       const overU = Math.abs(this._rc.u);
@@ -1605,7 +1623,7 @@ export class Audio {
     const A = this._ambience;
     if (!A.flowLow) return;
     const bright = clamp(0.35 * flowNorm + 0.65 * rough, 0, 1);
-    const dryAbove = 1 - 0.55 * clamp(this.listenerY - 1.6, 0, 1) / 6;   // height fade
+    const dryAbove = 1 - 0.5 * clamp((this.listenerY - 1.6) / 7, 0, 1);   // fades as the camera lifts
     const w = prox * dryAbove;
 
     A.flowLow.gain.setTargetAtTime(clamp((0.09 + 0.20 * flowNorm) * w, 0.0001, 0.5), t, 0.4);
