@@ -722,7 +722,7 @@ void main() {
   // column, so gate it on the real depth and on distance or the whole middle
   // distance bands over with false foam.
   float contact = (1.0 - smoothstep(0.06, 0.55, shoreT))
-                * smoothstep(2.2, 0.5, stillDepth) * ssW;
+                * (1.0 - smoothstep(0.5, 2.2, stillDepth)) * ssW;
   float wet = max(shoreBand, contact * 0.95);
   float wob = 0.11 * sin(vWorld.x * 1.6 + uTime * 1.15) + 0.11 * sin(vWorld.z * 2.0 - uTime * 1.55);
   float fnA = flowAlpha(uWaveA, vWorld.xz * 0.13, fdir, fspeed * 0.55, 3.4);
