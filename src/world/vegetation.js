@@ -336,8 +336,12 @@ export class Vegetation {
     // main.js replaces ctx.camera with the camera *rig* once that system boots,
     // so hold the real PerspectiveCamera from the engine.
     this.camera = this.ctx.engine?.camera || this.ctx.camera;
-    this.reedCount = Math.max(400, q.reedCount ?? 5200);
-    this.grassCount = Math.max(1000, q.grassCount ?? 18000);
+    // The scene is traversed ~4× per frame (main, water refraction, water
+    // reflection, post normal/depth), so every blade is charged four times.
+    // These caps keep the whole vegetation layer inside the triangle budget on
+    // the `high` tier; see INTEGRATION_NOTES.md.
+    this.reedCount = Math.min(Math.max(400, q.reedCount ?? 5200), 6800);
+    this.grassCount = Math.min(Math.max(1000, q.grassCount ?? 18000), 20000);
 
     this._buildReeds();
     this._buildGrass();
@@ -698,8 +702,8 @@ varying float vTip;`
     const total = this.grassCount;
     const mat = this._plantMaterial({
       bend: 0.34,
-      fadeStart: 44,
-      fadeEnd: 68,
+      fadeStart: 25,
+      fadeEnd: 39,
       trans: 1.35,
       transPow: 2.4,
     });
@@ -723,10 +727,10 @@ varying float vTip;`
     this._grassVeg = aVeg;
     this.group.add(mesh);
 
-    const slabCount = 14;
+    const slabCount = 10;
     this.grassField = new SlabField(
       mesh, [aVeg], slabCount,
-      Math.floor(total / slabCount), 10,
+      Math.floor(total / slabCount), 8,
       (idx, base, n) => this._fillGrassSlab(idx, base, n)
     );
   }

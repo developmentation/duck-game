@@ -74,8 +74,8 @@ const SPECIES_DEFS = [
     gill: { z: 0.30, slant: 0.10, w: 0.012 },
     pattern: [0.0, 0.0, 6.0, 0.0], // barFreq, barAmt, mottleScale, mottleAmt
     line: 0.9,
-    irid: 0.85,
-    gloss: 1.15,
+    irid: 0.7,
+    gloss: 0.9,
     shoalSize: [16, 34],
     cap: 300,
     cruise: 0.30,
@@ -570,7 +570,7 @@ void main() {
 
   // counter-shading: dark back, luminous flank, pale belly
   vec3 col = mix(uBelly, uFlankC, smoothstep(-0.70, -0.05, up));
-  col = mix(col, uBack, smoothstep(0.08, 0.72, up));
+  col = mix(col, uBack, smoothstep(-0.06, 0.58, up));
   col *= 1.0 + (vVar - 0.5) * 0.20;
 
   // vertical barring (perch, faint on pike)
@@ -583,12 +583,12 @@ void main() {
   col = mix(col, uMark, smoothstep(0.52, 0.86, m) * uPat.w);
 
   // lateral line
-  col *= 1.0 - 0.22 * uLine * smoothstep(0.07, 0.0, abs(up - 0.05))
+  col *= 1.0 - 0.22 * uLine * (1.0 - smoothstep(0.0, 0.07, abs(up - 0.05)))
               * smoothstep(0.3, 0.7, flank) * step(0.12, along);
 
   // gill plate: a crease, dark behind, catching light in front
   float gd = (vLocal.z - uGill.x) + up * uGill.y * uLen;
-  float gill = smoothstep(uGill.z * uLen, 0.0, abs(gd)) * smoothstep(0.25, 0.6, flank);
+  float gill = (1.0 - smoothstep(0.0, uGill.z * uLen, abs(gd))) * smoothstep(0.25, 0.6, flank);
   col *= 1.0 - gill * 0.20 * step(0.0, gd);
   float gillLit = gill * step(gd, 0.0);
 
@@ -621,7 +621,7 @@ void main() {
   vec3 H = normalize(L + V);
   float nh = max(dot(N, H), 0.0);
   float spec = pow(nh, 46.0) * uGloss;
-  float flash = pow(nh, 220.0) * uGloss * flank * 3.2;
+  float flash = pow(nh, 220.0) * uGloss * flank * 2.2;
   vec3 amb = uAmbient * (0.5 + 0.5 * (N.y * 0.5 + 0.5));
   vec3 lit = col * (uSunColor * wrap * uSunVis + amb);
   lit += uSunColor * (spec * (0.35 + flank * 0.9) + flash) * uSunVis * (0.4 + 0.6 * flank);
@@ -636,7 +636,7 @@ void main() {
   lit += uSunColor * ca * uCaustic * max(0.0, N.y) * exp(-dw * 0.30) * uSunVis;
 
   // water absorption along the light path + in-scattered water colour
-  float travel = dw + distance(uCamPos, vWorld) * 0.55;
+  float travel = dw + distance(uCamPos, vWorld) * 0.7;
   vec3 tr = exp(-uAbsorb * travel);
   lit = lit * tr + uWaterFill * (1.0 - tr) * (0.35 + 0.65 * uSunVis);
 
@@ -786,7 +786,7 @@ export class FishSchools {
       uSunVis: { value: 1 },
       uCamPos: { value: new THREE.Vector3() },
       uWaterLevel: { value: this.ctx.WATER_LEVEL ?? 0 },
-      uAbsorb: { value: new THREE.Vector3(0.30, 0.115, 0.088) },
+      uAbsorb: { value: new THREE.Vector3(0.38, 0.145, 0.105) },
       uWaterFill: { value: new THREE.Color(0.055, 0.145, 0.145) },
       uFogColor: { value: new THREE.Color(0.62, 0.72, 0.78) },
       uFogDensity: { value: 0.0024 },
@@ -846,7 +846,7 @@ export class FishSchools {
     const rnd = this.rand;
     const len = river.length;
     let id = 0;
-    for (let s = 30; s < len - 30; s += 42 + rnd() * 22) {
+    for (let s = 30; s < len - 30; s += 26 + rnd() * 16) {
       const pool = river.poolNear(s);
       const inPool = pool && Math.abs(pool.s - s) < pool.radius * 1.6;
       const dens = inPool ? pool.fishDensity : 0.55;
@@ -908,7 +908,14 @@ export class FishSchools {
 
   _activate(sh) {
     const sp = this.species[sh.spIdx];
-    const want = Math.max(1, Math.round(sh.size * this.spawnRate));
+    const want = Math.round(sh.size * this.spawnRate);
+    if (want < 1) {
+      // spawn rate turned right down: hold the shoal open but empty
+      sh.active = true;
+      sh.members.length = 0;
+      sh.respawn = 1e9;
+      return;
+    }
     const river = this.river;
     const rnd = this.rand;
     sh.active = true;
@@ -964,7 +971,7 @@ export class FishSchools {
 
   _preferredY(def, s, u, bedY, r) {
     const level = this.ctx.WATER_LEVEL ?? 0;
-    if (def.bedHugger) return bedY + 0.05 + r * 0.14;
+    if (def.bedHugger) return Math.min(bedY + 0.05 + r * 0.14, level - 0.12);
     const d0 = def.depthBand[0];
     const d1 = def.depthBand[1];
     let y = level - (d0 + r * (d1 - d0));
