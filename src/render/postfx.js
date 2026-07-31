@@ -1219,6 +1219,19 @@ export class PostFX {
    * un-graded image is still correctly tone mapped — that is the honest
    * "before" picture.
    */
+  /**
+   * Player-facing distance-blur control, 0..1.
+   *
+   * 1 is the authored cinematic depth of field; 0 disables the bokeh pass
+   * outright. This does NOT touch the atmospheric haze on the far hills — that
+   * is fog, it carries the sense of depth, and it stays either way.
+   */
+  setDofScale(v) {
+    this.params.dofScale = Math.max(0, Math.min(1, Number(v) || 0));
+    if (this.dof) this.dof.enabled = this.params.dofScale > 0.001;
+    return this.params.dofScale;
+  }
+
   setEnabled(on) {
     const want = !!on;
     if (want === this.enabled) return this.enabled;
@@ -1337,6 +1350,11 @@ export class PostFX {
 
     /* depth of field --------------------------------------------------- */
     if (this.dof) {
+      // Fully off means skipped, not "blurred by zero": the pass still costs a
+      // half-res gather and a composite, and a 0-radius gather can still shimmer.
+      this.dof.enabled = this.params.dofScale > 0.001;
+    }
+    if (this.dof && this.dof.enabled) {
       let fd = rig?.focusDistance;
       if (!(fd > 0)) {
         // No rig yet: focus on whatever the centre of frame is looking at.

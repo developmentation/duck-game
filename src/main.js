@@ -130,6 +130,8 @@ class Game {
       errors: this.errors || [],
       grab: () => this.engine.grab(),
       setTime: (v) => { settings.timeOfDay = v; },
+      // Distance blur, 0..1. Also on the pause menu; here for the capture harness.
+      setDof: (v) => this.sys.postfx?.setDofScale?.(v),
       teleport: (s, u = 0) => this.sys.player?.teleportRiver?.(s, u),
       screenshotMode: (on = true) => { this._hideUI = on; document.body.classList.toggle('capture', on); },
     };

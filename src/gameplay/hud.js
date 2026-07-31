@@ -135,6 +135,10 @@ const TEMPLATE = `
           <span>Volume <b id="p-vol-v">70%</b></span>
           <input type="range" id="p-vol" min="0" max="1" step="0.02" />
         </label>
+        <label class="field">
+          <span>Distance blur <b id="p-dof-v">100%</b></span>
+          <input type="range" id="p-dof" min="0" max="1" step="0.05" />
+        </label>
         <div class="pause-actions">
           <button class="btn" id="p-skip">Skip this objective</button>
           <button class="btn" id="p-restart">Restart</button>
@@ -197,6 +201,7 @@ export class HUD {
       pause: $('hud-pause'), pControls: $('p-controls'), pGames: $('p-games'),
       pJourney: $('p-journey'), pQuality: $('p-quality'), pTod: $('p-tod'),
       pTodV: $('p-tod-v'), pVol: $('p-vol'), pVolV: $('p-vol-v'),
+      pDof: $('p-dof'), pDofV: $('p-dof-v'),
       pResume: $('p-resume'), pSkip: $('p-skip'), pRestart: $('p-restart'),
       pReset: $('p-reset'),
     };
@@ -285,6 +290,24 @@ export class HUD {
     });
     this._applyVolume();
 
+    // Distance blur. Depth of field is a deliberate cinematic effect, but on a
+    // laptop screen it reads as the picture being out of focus, so it is the
+    // player's call. 0 turns the bokeh pass off entirely; the atmospheric haze
+    // on the far hills is fog, not blur, and deliberately stays.
+    try {
+      const d = localStorage.getItem('duckling.dof');
+      if (d != null) this.dofScale = clamp(parseFloat(d), 0, 1);
+    } catch { /* ignore */ }
+    if (this.dofScale == null) this.dofScale = 1;
+    els.pDof.value = String(this.dofScale);
+    els.pDofV.textContent = `${Math.round(this.dofScale * 100)}%`;
+    els.pDof.addEventListener('input', () => {
+      this.dofScale = parseFloat(els.pDof.value);
+      els.pDofV.textContent = `${Math.round(this.dofScale * 100)}%`;
+      this._applyDof();
+    });
+    this._applyDof();
+
     els.pResume.addEventListener('click', () => this.setPaused(false));
     els.pSkip.addEventListener('click', () => {
       this.ctx.get?.('quests')?.skip();
@@ -311,6 +334,11 @@ export class HUD {
     audio?.setMasterVolume?.(this.volume);
     audio?.setVolume?.(this.volume);
     try { localStorage.setItem('duckling.volume', String(this.volume)); } catch { /* ignore */ }
+  }
+
+  _applyDof() {
+    this.ctx.get?.('postfx')?.setDofScale?.(this.dofScale);
+    try { localStorage.setItem('duckling.dof', String(this.dofScale)); } catch { /* ignore */ }
   }
 
   _refreshJourney() {
