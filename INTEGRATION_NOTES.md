@@ -374,3 +374,13 @@ needs a rock-aware ground query on the river/terrain side; noted, not done.
 Water ribbon: 59 → 71 columns for the shore fade, +≈4k triangles, still one
 draw call. Terrain: identical column count (`CHANNEL_U` redistributed, not
 extended), so no delta.
+
+**Observed, not introduced, not diagnosed**: `shots/shore1`, `shots/family` and
+`shots/particles7` all carry a wall of
+`GL_INVALID_FRAMEBUFFER_OPERATION: Framebuffer is incomplete: Attachments are
+not all the same size` in `report.json`. It appears after the page has lost and
+restored its WebGL context (the run that produced it also logged
+`Execution context was destroyed … navigation`), and it happens on runs made
+before and after this change, so it is not the water's new attributes. Most
+likely candidate is a render target whose colour and depth attachments are
+rebuilt out of step across a context restore. Worth someone owning.
