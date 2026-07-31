@@ -313,7 +313,7 @@ export class Particles {
           vec2 sp = uSunView.xy;
           float spl = max(length(sp), 0.001);
           vec2 sdir = sp / spl;
-          float caustic = smoothstep(0.30, 0.0, length(c + sdir * 0.46));
+          float caustic = 1.0 - smoothstep(0.0, 0.30, length(c + sdir * 0.46));
 
           float rim = smoothstep(0.42, 0.99, r);
           float shell = rim * 0.62 + fres * 0.30;
@@ -394,7 +394,7 @@ export class Particles {
             d.x /= max(vStretch, 1.0);
             float r = length(d);
             if (r > 1.0) discard;
-            float core = smoothstep(1.0, 0.05, r);
+            float core = 1.0 - smoothstep(0.05, 1.0, r);
             col = mix(uFogColor, uSunColor, 0.45) * (0.85 + 0.5 * core);
             a = core * core * 0.55 * vFade;
           } else {
@@ -455,9 +455,9 @@ export class Particles {
           vec2 c = gl_PointCoord * 2.0 - 1.0;
           float r = length(c);
           if (r > 1.0) discard;
-          float halo = smoothstep(1.0, 0.0, r);
+          float halo = 1.0 - smoothstep(0.0, 1.0, r);
           halo *= halo;
-          float core = smoothstep(0.42, 0.0, r);
+          float core = 1.0 - smoothstep(0.0, 0.42, r);
           vec3 warm = uSunColor * 1.15;
           vec3 cool = mix(uAmbient, uFogColor, 0.5);
           vec3 col = mix(cool, warm, vWarm);
@@ -555,8 +555,9 @@ export class Particles {
             vec2 q = vUv * vec2(2.6, 1.5) + vec2(seed * 31.0 + uTime * 0.012, seed * 17.0 - uTime * 0.006);
             float n = fbm3(q * 1.7);
             float n2 = fbm3(q * 4.3 + 11.0);
-            float mask = smoothstep(1.02, 0.12, length(p * vec2(1.0, 1.25)));
-            float body = mask * (0.42 + 0.72 * n) - 0.20 * n2;
+            float mask = 1.0 - smoothstep(0.10, 1.00, length(p * vec2(1.0, 1.25)));
+            if (mask <= 0.002) discard;
+            float body = mask * mask * (0.42 + 0.78 * n) - 0.22 * n2 * mask;
             body = max(body, 0.0);
             // volumetric-ish shading: brighter on the sun-facing side
             vec2 sd = length(vSunUv) > 0.001 ? normalize(vSunUv) : vec2(0.0, 1.0);
@@ -570,11 +571,12 @@ export class Particles {
           } else if (kind < 1.5) {
             // expanding foam / marker ring
             float ring = vP2.z;
-            float w = 0.10 + 0.26 * (1.0 - life);
-            float band = smoothstep(w, 0.0, abs(r - ring));
+            float w = 0.055 + 0.075 * (1.0 - life);
+            float band = 1.0 - smoothstep(0.0, w, abs(r - ring));
+            band *= band;
             float wob = 0.72 + 0.28 * vnoise(vec2(atan(p.y, p.x) * 2.4 + seed * 20.0, seed * 8.0));
             band *= wob;
-            band *= smoothstep(1.05, 0.85, r);
+            band *= 1.0 - smoothstep(0.80, 1.02, r);
             float foam = fbm3(vec2(atan(p.y, p.x) * 3.5, r * 7.0) + seed * 13.0);
             col = mix(vCol, uSunColor * 1.15, 0.35 + 0.35 * foam);
             a = band * vP2.x * life * (0.55 + 0.65 * foam);
@@ -584,11 +586,11 @@ export class Particles {
             float prof = 1.0 - x * x;                 // arc profile
             float top = prof * (0.35 + 0.65 * (1.0 - life * 0.55));
             float h = vUv.y;
-            float body = smoothstep(top + 0.03, top - 0.30, h) * smoothstep(0.0, 0.16, h);
+            float body = (1.0 - smoothstep(top - 0.30, top + 0.03, h)) * smoothstep(0.0, 0.16, h);
             float streak = fbm3(vec2(x * 6.0 + seed * 21.0, h * 3.2 - uTime * 0.4));
             body *= 0.45 + 0.9 * streak;
-            body *= smoothstep(1.0, 0.55, abs(x));
-            float crest = smoothstep(0.10, 0.0, abs(h - top)) * streak;
+            body *= 1.0 - smoothstep(0.55, 1.0, abs(x));
+            float crest = (1.0 - smoothstep(0.0, 0.10, abs(h - top))) * streak;
             vec3 warm = uSunColor * 1.2;
             col = mix(vCol, warm, 0.25 + 0.55 * crest);
             a = (body * 0.75 + crest * 0.55) * vP2.x * life;
@@ -848,7 +850,7 @@ export class Particles {
     this._sheetRing(x, y, z, 0.9 + st * 2.0, st * 0.8, null);
     this._ripple(x, z, _clamp(0.05 + st * 0.14, 0.02, 0.3), 1.6 + st * 2.6);
     if (st > 0.55) {
-      this.mistPuff(x, y + 0.25 + st * 0.2, z, 0.9 + st * 1.4, 0.16 + st * 0.12);
+      this.mistPuff(x, y + 0.25 + st * 0.2, z, 0.9 + st * 1.4, 0.10 + st * 0.07);
     }
   }
 
@@ -862,7 +864,7 @@ export class Particles {
     const strength = o.strength ?? 1;
 
     // two staggered rings, the second delayed by a shorter start radius
-    const r1 = this._sheetRing(x, gy + 0.02, z, 1.5 * strength, 0.75, col);
+    const r1 = this._sheetRing(x, gy + 0.02, z, 1.5 * strength, 0.55, col);
     if (r1 >= 0) { this.sheets.life[r1] = 1.25; this.sheets.vy[r1] = 0.12; }
     const r2 = this._sheetRing(x, gy + 0.015, z, 2.6 * strength, 0.5, col);
     if (r2 >= 0) { this.sheets.life[r2] = 1.7; this.sheets.vy[r2] = 0.02; this.sheets.a1[r2] = 0.32; }
@@ -972,7 +974,7 @@ export class Particles {
         d.a2[idx] = rng() * 6.283;
       }
       this.downBurst(p.x, p.y + 0.1, p.z, 3, 0.16);
-      this.mistPuff(p.x, p.y + 0.1, p.z, 0.7, 0.20);
+      this.mistPuff(p.x, p.y + 0.1, p.z, 0.7, 0.13);
     };
   }
 

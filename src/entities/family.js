@@ -247,6 +247,7 @@ export class Family {
     this._flow = new THREE.Vector3();
     this._normal = new THREE.Vector3(0, 1, 0);
     this._desired = new THREE.Vector3();
+    this._steerV = new THREE.Vector3();
     this._coord = { s: 0, u: 0, distance: 0 };
     this._coord2 = { s: 0, u: 0, distance: 0 };
     this._euler = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -261,7 +262,10 @@ export class Family {
   async init() {
     const ctx = this.ctx;
     const quality = settings.quality?.name || 'high';
-    const downShell = quality !== 'low';
+    // The down shell is a second (transparent) pass per duckling. Lovely up
+    // close, but 8 of them cost 16 draw calls once the reflection pass is
+    // counted, so it is a `high` tier luxury.
+    const downShell = quality === 'high';
     const count = quality === 'low' ? 6 : 8;
 
     ctx.scene.add(this.group);
@@ -650,7 +654,8 @@ export class Family {
         !player.submerged &&
         dPlayer < range &&
         dPlayer < dMother + 4.5 &&
-        (ahead > 0.3 || (leadAmount > 0.5 && playerMoving)) &&
+        ahead > 0.3 &&
+        (leadAmount > -1.5 || (leadAmount > -4 && playerMoving)) &&
         a.boldness > 0.2;
       const next = wantPlayer ? 'player' : 'mother';
       if (next !== a.leader) {
@@ -810,15 +815,15 @@ export class Family {
    */
   _steer(a, target, speedWant, dt, drift, isDuckling = false) {
     const river = this.river;
-    this._desired.copy(target).sub(a.position);
-    this._desired.y = 0;
-    const dist = this._desired.length();
-    if (dist > 1e-4) this._desired.multiplyScalar(speedWant / dist);
-    else this._desired.set(0, 0, 0);
+    this._steerV.copy(target).sub(a.position);
+    this._steerV.y = 0;
+    const dist = this._steerV.length();
+    if (dist > 1e-4) this._steerV.multiplyScalar(speedWant / dist);
+    else this._steerV.set(0, 0, 0);
 
     if (drift > 0) {
       river.flowAt(a.coord.s, clamp(a.coord.u, -1, 1), this._flow);
-      this._desired.addScaledVector(this._flow, drift);
+      this._steerV.addScaledVector(this._flow, drift);
     }
 
     // --- avoidance ---------------------------------------------------------
@@ -827,10 +832,10 @@ export class Family {
     const edge = Math.abs(au) - 0.80;
     if (edge > 0) {
       river.right(a.coord.s, this._a);
-      this._desired.addScaledVector(this._a, -Math.sign(au) * edge * 6.0);
+      this._steerV.addScaledVector(this._a, -Math.sign(au) * edge * 6.0);
     }
     // rocks
-    this._avoidRocks(a, this._desired);
+    this._avoidRocks(a, this._steerV);
     // each other
     for (let i = 0; i < this._agents.length; i++) {
       const o = this._agents[i];
@@ -842,8 +847,8 @@ export class Family {
       if (d2 < rad * rad && d2 > 1e-6) {
         const d = Math.sqrt(d2);
         const push = (rad - d) / rad * 1.5;
-        this._desired.x += (dx / d) * push;
-        this._desired.z += (dz / d) * push;
+        this._steerV.x += (dx / d) * push;
+        this._steerV.z += (dz / d) * push;
       }
     }
     // the player is a duckling too — do not swim through them
@@ -854,16 +859,16 @@ export class Family {
       const d2 = dx * dx + dz * dz;
       if (d2 < 0.30 && d2 > 1e-6) {
         const d = Math.sqrt(d2);
-        this._desired.x += (dx / d) * (0.55 - d) * 3.0;
-        this._desired.z += (dz / d) * (0.55 - d) * 3.0;
+        this._steerV.x += (dx / d) * (0.55 - d) * 3.0;
+        this._steerV.z += (dz / d) * (0.55 - d) * 3.0;
       }
     }
 
     // --- integrate ---------------------------------------------------------
     const accel = isDuckling ? 5.0 : 3.6;
     const k = clamp(accel * dt, 0, 1);
-    a.velocity.x += (this._desired.x - a.velocity.x) * k;
-    a.velocity.z += (this._desired.z - a.velocity.z) * k;
+    a.velocity.x += (this._steerV.x - a.velocity.x) * k;
+    a.velocity.z += (this._steerV.z - a.velocity.z) * k;
     const maxV = a.maxSpeed * a.sprint + 2.0;
     const vlen = Math.hypot(a.velocity.x, a.velocity.z);
     if (vlen > maxV) {
