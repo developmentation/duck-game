@@ -384,3 +384,70 @@ restored its WebGL context (the run that produced it also logged
 before and after this change, so it is not the water's new attributes. Most
 likely candidate is a render target whose colour and depth attachments are
 rebuilt out of step across a context restore. Worth someone owning.
+
+---
+
+## audio (`src/gameplay/audio.js`)
+
+Everything is synthesised at runtime — no files, no network, one `AudioContext`.
+It costs **0 draw calls and 0 triangles**; the only frame cost is one 10 Hz
+world sample and a handful of `AudioParam` writes.
+
+### What other systems can use
+
+```js
+const audio = ctx.get('audio');
+audio.play(name, { position, volume, rate, strength, count })  // same as EVENTS.SFX
+audio.setVolume(0..1)      audio.volume        // persisted in localStorage
+audio.mute(bool)           audio.muted         audio.toggleMute()
+audio.setMusicEnabled(bool)                    // music only, ambience stays
+audio.state                // 'running' | 'suspended' | 'unavailable'
+audio.running / audio.ready / audio.available / audio.blockedReason
+audio.underwater           // 0..1 smoothed, the muffle amount
+audio.intensity            // 0..1 "something is happening", drives the score
+audio.selfTest()           // node graph + per-voice construction check
+audio.names                // every sound name it knows
+```
+
+**HUD**: the settings panel wants `setVolume` / `mute` / `volume` / `muted`,
+and should show a "click to enable sound" hint while `audio.running === false`
+(autoplay is blocked until the first gesture — the system listens for
+pointerdown / keydown / touchstart / mousedown / wheel on `window` itself, so
+the HUD does not have to forward anything).
+
+**Sound names** currently voiced: `splash dive surface quack peep bubbles
+dabble preen waddle wingbeat fish-rise fish-catch fish-escape chime plop
+ripple`. An unknown name is not an error — it plays a soft plop, so emitting a
+new one is safe. `rate >= 1.45` on `quack` switches to the duckling peep, which
+is how `family.js`'s `_peep()` already sounds right without changing.
+
+Events consumed: `SFX`, `SPLASH` (strength scales the voice), `RIPPLE`
+(strength ≥ 0.5), `DIVE`, `SURFACE`, `QUACK`, `BUBBLES`, `FISH_CAUGHT`,
+`QUEST_COMPLETED`, `GAME_ENDED`, `SHAKE`. Footsteps are generated internally
+from `player.grounded / speed`, since nothing emits a step event.
+
+### Notes for other owners
+
+* **`DIVE` / `SURFACE` / `QUACK` are each emitted twice** — the bare event and
+  then an `SFX` event with the same meaning (`duckPlayer._enterSubmerged`,
+  `duckPlayer._quack`, `family._quack`). Audio parks the bare event for one
+  frame and only voices it if no `SFX` followed, because the `SFX` payload is
+  the one that carries `rate`. Nothing needs to change, but if a new emitter
+  sends only one of the pair it will still be heard exactly once.
+* **`ctx.player.submerged` vs the camera.** The listener sits at the camera, so
+  the muffle keys off `cameraRig.underwater` when it exists and falls back to
+  `player.submerged`. If the rig ever stops publishing `underwater`, the
+  transition still works, it just fires when the duck goes under rather than
+  when the eye does.
+* **`terrain.rocks`** is sampled (bucketed, ≤260 entries per pass at 10 Hz) to
+  find surface-breaking boulders — near rocks + fast shallow water is what
+  turns the river bed from a low roll into a bright riffle. A
+  `terrain.rockNear(x, z)` query would let me drop that scan.
+* **`vegetation.windStrength` / `coverAt(s, u)`** drive the reed rustle. They
+  are optional; without vegetation the wind falls back to a slow sine.
+* **quality tiers**: audio ignores `settings.quality`. If a `low` tier machine
+  needs relief, `audio.setMusicEnabled(false)` removes 8 oscillators; the
+  ambience is 7 buffer sources and cannot get much cheaper.
+* Request for `src/main.js` (not made, worked around): nothing. The system
+  boots from the manifest and needs no handle. `window.__duck.sys.audio` is
+  enough for the capture harness.

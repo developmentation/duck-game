@@ -644,6 +644,15 @@ export class Quests {
             quest: this._describe(q), step, total: 4,
           });
         }
+        // Stuck? Say the hint again rather than leave them guessing.
+        if (q.progress > before + 0.002) this._idle = 0;
+        else this._idle = (this._idle || 0) + dt;
+        if (this._idle > 34 && q.progress < 1) {
+          this._idle = 0;
+          ctx.events.emit(ctx.EVENTS.TOAST, {
+            text: q.hint, icon: q.icon, duration: 5, kind: 'hint',
+          });
+        }
         if (q.progress >= 1) this._complete(q);
       }
     }

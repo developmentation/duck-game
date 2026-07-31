@@ -287,7 +287,7 @@ body.capture .hud { display: none; }
 .hud-prompt {
   position: absolute;
   left: 50%;
-  bottom: calc(var(--safe) + 62px);
+  bottom: calc(var(--safe) + 106px);
   transform: translate(-50%, 8px);
   opacity: 0;
   transition: opacity 0.35s var(--ease), transform 0.35s var(--ease);
@@ -784,19 +784,29 @@ body.capture .hud { display: none; }
 
 /* ── small screens ─────────────────────────────────────────────────────── */
 
-@media (max-width: 760px) {
+/* Stacking inside the HUD: meters must never disappear behind a lesson. */
+.hud-lesson { z-index: 2; }
+.hud-toasts { z-index: 3; }
+.hud-meters, .hud-prompt { z-index: 4; }
+
+@media (max-width: 900px) {
   .hud-objective { width: min(230px, 54vw); }
   .ho-title { font-size: 15px; }
+  /* One column of stacked strips instead of two corners that would collide. */
   .hud-lesson {
-    right: 50%;
-    transform: translate(50%, 14px);
-    width: min(340px, 88vw);
+    left: var(--safe);
+    right: calc(var(--safe) + 78px);
+    width: auto;
+    transform: translateY(14px);
   }
-  .hud-lesson.show { transform: translate(50%, 0) rotate(-0.4deg); }
+  .hud-lesson.show { transform: rotate(-0.4deg); }
   .hud-hint { display: none; }
   .m-track { width: 128px; }
+  .stamina .m-track { width: 96px; }
   .pause-cols { grid-template-columns: 1fr; gap: 18px; }
-  .hud-toasts { max-width: 70vw; bottom: calc(var(--safe) + 130px); }
+  .hud-toasts { max-width: 62vw; bottom: calc(var(--safe) + 172px); }
+  .hud-meters { bottom: calc(var(--safe) + 118px); }
+  .hud-prompt { bottom: calc(var(--safe) + 176px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

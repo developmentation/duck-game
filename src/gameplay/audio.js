@@ -47,6 +47,9 @@ const SFX_NAMES = [
 
 /** Minor pentatonic degrees in semitones — the whole musical vocabulary. */
 const PENTATONIC = [0, 3, 5, 7, 10];
+/** Events that arrive twice (bare + SFX); voiced one frame late. */
+const DEFERRED = ['dive', 'surface', 'quack'];
+
 /** Tonal centres the score drifts between, in Hz (D3, F3, A2). */
 const ROOTS = [146.83, 174.61, 110.0];
 
@@ -112,6 +115,7 @@ export class Audio {
     this._stepPhase = 0;
     this._stepFoot = 0;
     this._lastEvent = Object.create(null);   // name → last play time (dedupe)
+    this._deferred = { dive: null, surface: null, quack: null };
     this._retired = [];                      // { t, n[] } voices awaiting cleanup
     this._ambience = Object.create(null);
     this._offs = [];                         // event unsubscribers
@@ -1432,7 +1436,7 @@ export class Audio {
       this.play('ripple', { position: p.position, volume: 0.35 });
     });
     // DIVE / SURFACE / QUACK are emitted alongside an SFX event by the player
-    // and the family, so only act on them if no SFX arrived in the same tick.
+    // and the family — parked for a frame, see _ifNotAlready below.
     on(EVENTS.DIVE, (p) => this._ifNotAlready('dive', p, 0.9));
     on(EVENTS.SURFACE, (p) => this._ifNotAlready('surface', p, 0.8));
     on(EVENTS.QUACK, (p) => this._ifNotAlready('quack', p, 0.9, p && p.pitch));
@@ -1497,6 +1501,7 @@ export class Audio {
     }
     this.stats.voicesActive = this._retired.length;
 
+    this._flushDeferred(t);
     this._updateListener();
 
     // --- world sampling, 10 Hz ---------------------------------------------
@@ -1674,8 +1679,11 @@ export class Audio {
     if (Math.abs(uw - this._lastUw) > 0.002 || (uw > 0.02 && Math.abs(depth - (this._lastDepth || 0)) > 0.25)) {
       this._lastUw = uw;
       this._lastDepth = depth;
-      // Deeper is darker: 20 kHz dry, 340 Hz just under, 165 Hz at 6 m.
-      const target = lerp(20000, lerp(340, 165, clamp(depth / 6, 0, 1)), uw);
+      // Deeper is darker: 20 kHz dry, 340 Hz just under, 165 Hz at 6 m. The
+      // glide is geometric, not linear — a linear sweep spends its first half
+      // between 20 kHz and 10 kHz, which is inaudible, and then slams shut.
+      const dark = lerp(340, 165, clamp(depth / 6, 0, 1));
+      const target = 20000 * Math.pow(dark / 20000, uw);
       this.muffle.frequency.setTargetAtTime(target, t, 0.06);
       this.muffle.Q.setTargetAtTime(lerp(0.4, 1.1, uw), t, 0.1);
       this.lowShelf.gain.setTargetAtTime(lerp(0, 7.5, uw), t, 0.1);
@@ -1816,9 +1824,12 @@ export class Audio {
     };
     for (const k of Object.keys(this._ambience)) {
       const n = this._ambience[k];
-      out.ambience[k] = n && n.gain ? Number(n.gain.value.toFixed(4))
-        : n && n.frequency ? Math.round(n.frequency.value)
-          : n ? n.constructor.name : 'missing';
+      // Filters first: a BiquadFilterNode also has a `.gain` param, so testing
+      // for gain first reports every filter as 0.
+      out.ambience[k] = !n ? 'missing'
+        : n.frequency ? `${n.type || 'osc'} ${Math.round(n.frequency.value)}Hz`
+          : n.gain ? Number(n.gain.value.toFixed(4))
+            : n.constructor.name;
     }
 
     // Construct every voice into the silent bus.

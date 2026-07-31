@@ -491,19 +491,27 @@ export class HUD {
 
     /* objective ---------------------------------------------------------- */
     if (quests) {
-      const q = quests.current;
       const running = games?.isRunning;
-      const showObj = !!q && !quests.allDone && !running;
+      // After the story is finished there is still always a next thing: the
+      // nearest game on the river.
+      const free = quests.allDone ? this._nearestGame(games, player) : null;
+      const q = quests.allDone ? free : quests.current;
+      const showObj = !!q && !running;
       els.obj.classList.toggle('show', showObj);
       if (showObj) {
-        setText(els.step, `${quests.index + 1} / ${quests.total}`);
+        setText(els.step, free ? 'free' : `${quests.index + 1} / ${quests.total}`);
         setText(els.icon, q.icon);
-        setText(els.title, q.objective);
-        setWidth(els.fill, q.progress);
-        const target = quests.objectiveTarget;
-        if (target) {
+        setText(els.title, free ? `Play ${q.name}` : q.objective);
+        setWidth(els.fill, free ? 0 : q.progress);
+        const target = free ? free.spot?.position : quests.objectiveTarget;
+        if (target && player) {
           els.meta.style.visibility = 'visible';
-          setText(els.dist, quests.objectiveLabel);
+          if (free) {
+            const d = Math.hypot(target.x - player.position.x, target.z - player.position.z);
+            setText(els.dist, `${Math.round(d)} m`);
+          } else {
+            setText(els.dist, quests.objectiveLabel);
+          }
           this._pointArrow(els.arrow, target);
         } else {
           els.meta.style.visibility = 'hidden';
@@ -571,6 +579,19 @@ export class HUD {
       const b = els.prompt.querySelector('[data-start]');
       if (b) b.addEventListener('click', () => this.ctx.get?.('minigames')?.start(b.dataset.start));
     }
+  }
+
+  /** Nearest playable game spot — the objective once the story is finished. */
+  _nearestGame(games, player) {
+    if (!games || !player) return null;
+    let best = null;
+    let bestD = Infinity;
+    for (const m of games.modes) {
+      if (!m.spot || !games.modeAvailable(m)) continue;
+      const d = Math.abs((player.riverCoord?.s ?? 0) - m.spot.s);
+      if (d < bestD) { bestD = d; best = m; }
+    }
+    return best;
   }
 
   /** Rotate a chevron so it points at a world position, camera-relative. */
