@@ -275,3 +275,102 @@ Requests / findings for other owners:
   fixed it. Worth knowing if another system instances quads.
 * **duckPlayer**: I implement `emit('marker', {x,y,z})` — call it on tap-to-move
   and the tap gets a warm expanding ring plus rising motes.
+
+## shoreline + buoyancy (terrain.js, groundMaterial.js, water.js, waterMaterial.js)
+
+Two player-reported bugs, both diagnosed offline before touching pixels
+(`node` harness driving the real `River` + `Water` classes, no DOM needed).
+
+### 1. The waterline — root cause was in `river.depth`, not in the shaders
+
+`river.depth(s, u)` clamps a *skewed* cross-channel profile:
+
+```js
+const uu = clamp((u - skew) / (1 - Math.abs(skew) * 0.6), -1, 1);
+let profile = Math.pow(Math.max(0, 1 - uu * uu), 0.62);
+```
+
+so on a bend the profile saturates and the bed reaches WATER_LEVEL **well
+inside |u| = 1**. Measured over the whole river at 2 m steps:
+
+* the waterline sits at |u| ≤ 0.3 on 278 of 2028 (station, side) samples;
+* the widest dry point bar is **10.9 m of nominal channel at exactly y = 0**;
+* the waterline |u| can move **0.40 (≈ 7 m) between two adjacent 2.14 m rows**.
+
+Nothing knew this. Both ribbons put all their cross-channel resolution at
+|u| = 1, so:
+
+* the ground ribbon resolved the real shelf (a 2 m drop inside one metre) with
+  columns 1.1 m apart and **undershot the true bed by up to 1.14 m** — those are
+  the dark wedges;
+* the water ribbon painted opaque water and saturated shore foam across the
+  whole bar, **exactly coplanar with the ground** — that is the stair-stepped
+  z-fighting patchwork and the blown-out bright patches. Both materials also
+  had `polygonOffset` with a slope factor, so at grazing angles they took turns
+  winning.
+
+Fix: `terrain.js` now exports `shoreU(river, s, side)` — a bisection on
+`river.depth`, cached at 1 m and linearly interpolated (which also removes the
+staircase that `curvature()`'s 1 m lookup table puts into the raw edge).
+**Both ribbons scale their cross-section by it**, so their channel columns are a
+normalised parameter `v` where `v = ±1` is the waterline wherever the bend has
+put it. `world/water.js` imports `shoreU` from `world/terrain.js` for this — the
+one place the two systems are deliberately coupled, because a few centimetres of
+disagreement is the whole bug.
+
+The water's `aDepth` attribute is now the **signed** still-water depth
+(`WATER_LEVEL - river.bedHeight`), and the shader's shore alpha, foam band, wet
+band and skirt drop all key off it plus `aSU.z` (metres from the same
+waterline). The visible edge is therefore an analytic contour of a smoothly
+interpolated value, not the intersection of two coarse meshes. `groundMaterial`
+shades silt → wet → damp → scum line → dry off the same signed distance
+(`aTerrain.x`, now measured from the real waterline).
+
+**Other systems: `aTerrain.x` / `vShoreDist` changed meaning** — it used to be
+`-(1 - |u|) * halfWidth`; it is now signed metres from the *actual* waterline.
+Nothing outside terrain reads it today, but if you copy the ribbon idea, note it.
+
+**Anything that places props in "the channel" (vegetation, fish, family, rocks)
+should stop assuming `|u| < 1` means water.** Use `ctx.water.signedDepthAt(x, z)`
+or `ctx.water.isWaterAt(x, z)` (new, see below) — on a fifth of the river,
+`|u| = 0.4` is dry gravel.
+
+### 2. The duck being dragged under — the ripple field had a crest at its own origin
+
+`ripplesAt()` used `exp(-(d - r0)^2 / w^2)`, which is at **full crest when
+d = 0 and r0 = 0**. Every dive/surface transition emits four rings at the duck's
+own position (DIVE/SURFACE + two from the SPLASH handler + one from the player),
+so the instant the duck crossed `SUB_ENTER` its own splash lifted
+`water.heightAt` by ~0.5 m under its feet, which re-triggered the transition,
+which emitted more rings. Measured in the offline harness: after a single dive,
+**95 state flips in 14 s and `heightAt` running away to +1.07 m** — the duck is
+reported permanently submerged and flapping cannot help because there is nothing
+wrong with its position, only with the surface it is being compared to.
+
+Fixed inside `waterMaterial.js` (GLSL and its JS twin together): rings ramp in
+over the first 0.45 m of radius, the wave packet is 45% narrower on the inside
+(the water a ring has crossed has relaxed), and the summed height is clamped to
+±0.26 m. `addRipple` caps a single ring at 0.32 m. After the fix, across 120
+dive-and-release tests at stations along the whole river: **worst case 4 flips
+in 10 s, `heightAt` never leaves ±0.18 m.** No change needed in duckPlayer.js.
+
+### New on `ctx.water`
+
+```js
+water.signedDepthAt(x, z)   // + in the channel, - once the bed is out of the water
+water.isWaterAt(x, z, min?) // cheap "is there real water here"
+```
+
+`heightAt` and `normalAt` are now hard-guarded: non-finite inputs return the
+still level / (0,1,0), the result is clamped to ±0.45 m of the still level, and
+the normal can never point below the horizon. **`heightAt` still knows nothing
+about boulders** — a duck standing on a rock whose top is above the waterline is
+told the water surface is above it, because `duckPlayer` also takes its bed
+height from `river.bedHeight`, which has no rocks in it either. Fixing that
+needs a rock-aware ground query on the river/terrain side; noted, not done.
+
+### Budget
+
+Water ribbon: 59 → 71 columns for the shore fade, +≈4k triangles, still one
+draw call. Terrain: identical column count (`CHANNEL_U` redistributed, not
+extended), so no delta.
