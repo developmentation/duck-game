@@ -645,13 +645,13 @@ export class Family {
       // same rule it applies to its mother. Bold ones commit at longer range;
       // the runt never leaves mum.
       const ahead = pc.s - a.coord.s;
-      const range = 2.6 + a.boldness * 5.5;
+      const range = 3.6 + a.boldness * 6.0;
       const wantPlayer =
         !player.submerged &&
         dPlayer < range &&
-        dPlayer < dMother + 3.5 &&
-        (ahead > 0.4 || (leadAmount > 0.5 && playerMoving)) &&
-        a.boldness > 0.28;
+        dPlayer < dMother + 4.5 &&
+        (ahead > 0.3 || (leadAmount > 0.5 && playerMoving)) &&
+        a.boldness > 0.2;
       const next = wantPlayer ? 'player' : 'mother';
       if (next !== a.leader) {
         a.leader = next;
@@ -999,21 +999,27 @@ export class Family {
     this._euler.set(a.pitch, a.yaw, a.roll);
     a.object.quaternion.setFromEuler(this._euler);
 
-    // Wake. Throttled by distance travelled so it does not eat ripple slots.
-    if (water?.addWake && !a.grounded && a.speed > 0.12) {
+    // Wake. The water only has 24 ripple slots for the whole world, so the
+    // family takes a small share: only the ducks close to camera shed rings,
+    // and they shed them per metre travelled rather than per second.
+    const near = this._camPos.distanceToSquared(a.position);
+    const wakeRange = a.kind === 'mother' ? 24 * 24 : 15 * 15;
+    if (water?.addWake && !a.grounded && a.speed > 0.15 && near < wakeRange) {
       a.wakeAcc += a.speed * dt;
-      const step = a.kind === 'mother' ? 0.42 : 0.34;
+      const step = a.kind === 'mother' ? 0.85 : 1.25;
       if (a.wakeAcc > step) {
         a.wakeAcc = 0;
         const inv = 1 / Math.max(a.speed, 1e-3);
-        const st = clamp(a.speed * (a.kind === 'mother' ? 0.030 : 0.016), 0.006, 0.06);
+        const st = clamp(a.speed * (a.kind === 'mother' ? 0.048 : 0.030), 0.012, 0.075);
         water.addWake(
           a.position.x - Math.sin(a.yaw) * 0.12,
           a.position.z - Math.cos(a.yaw) * 0.12,
           a.velocity.x * inv, a.velocity.z * inv,
-          st, a.kind === 'mother' ? 2.3 : 1.4
+          st, a.kind === 'mother' ? 2.8 : 1.9
         );
       }
+    } else if (a.wakeAcc > 0) {
+      a.wakeAcc = 0;
     }
   }
 

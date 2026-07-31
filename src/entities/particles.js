@@ -163,6 +163,7 @@ export class Particles {
     this._sprayRock = 0;
     this._sprayHooked = false;
     this._mistAmount = 0;
+    this._mistInit = false;
     this._sortEvery = 0;
   }
 
@@ -593,7 +594,7 @@ export class Particles {
             a = (body * 0.75 + crest * 0.55) * vP2.x * life;
           }
 
-          a *= softFade(vZ, vP2.z > 0.0 && kind > 0.5 ? 0.25 : 0.9);
+          a *= softFade(vZ, kind < 0.5 ? 2.6 : (kind < 1.5 ? 0.22 : 0.7));
           float fog = fogAmount(vZ);
           col = mix(col, uFogColor, fog * 0.65);
           a *= 1.0 - fog * 0.6;
@@ -693,8 +694,8 @@ export class Particles {
       d.life[idx] = kind === D_SPRAY ? 0.8 + rng() * 1.5 : 0.6 + rng() * 1.1;
       const t = rng();
       d.size[idx] = kind === D_SPRAY
-        ? 0.012 + t * 0.030
-        : (0.010 + t * t * 0.036) * (0.7 + strength * 0.7);
+        ? 0.018 + t * 0.042
+        : (0.014 + t * t * 0.048) * (0.7 + strength * 0.7);
       d.seed[idx] = rng();
       d.kind[idx] = kind;
       d.a0[idx] = 0; d.a1[idx] = 0; d.a2[idx] = rng() * 6.283;
@@ -718,7 +719,7 @@ export class Particles {
       d.vz[idx] = dz * sp + (rng() - 0.5) * 0.9;
       d.age[idx] = 0;
       d.life[idx] = 1.1 + rng() * 1.8;
-      d.size[idx] = 0.02 + rng() * 0.055;
+      d.size[idx] = 0.028 + rng() * 0.075;
       d.seed[idx] = rng();
       d.kind[idx] = D_SPRAY;
       d.a2[idx] = rng() * 6.283;
@@ -831,9 +832,9 @@ export class Particles {
     const st = _clamp(strength, 0.05, 2.0);
     const rng = this.rng;
     // crown of droplets
-    this.dropletBurst(x, y, z, Math.round(10 + st * 26), st, 0.10 + st * 0.16, D_DROP);
+    this.dropletBurst(x, y, z, Math.round(14 + st * 34), st, 0.10 + st * 0.16, D_DROP);
     // fine spray hanging above it
-    this.sprayBurst(x, y + 0.06, z, Math.round(4 + st * 12), st * 0.8, dir);
+    this.sprayBurst(x, y + 0.06, z, Math.round(6 + st * 16), st * 0.8, dir);
     // the sheet / curtain
     const w = 0.55 + st * 1.5;
     const i = this._sheetSpawn(S_SHEET, x, y + 0.02, z, w, w * (0.42 + st * 0.20),
@@ -1009,11 +1010,13 @@ export class Particles {
     for (const r of rocks) {
       const p = r.position;
       if (!p) continue;
-      if (p.y < -0.55 || p.y > 1.1) continue;      // must break the surface
+      const top = p.y + (r.radius ?? 0.4);
+      if (top < -0.30 || top > 1.6) continue;     // must break, or nearly break, the surface
       const rc = river.toRiver(p, this._rc);
+      if (Math.abs(rc.u) > 1.0) continue;
       const flow = river.flowAt(rc.s, rc.u, this._v2);
       const speed = flow.length();
-      if (speed < 1.35) continue;
+      if (speed < 0.95) continue;
       this.sprayRocks.push({
         x: p.x, y: p.y, z: p.z, r: r.radius ?? 0.5,
         dx: flow.x / speed, dz: flow.z / speed, speed,
@@ -1097,12 +1100,13 @@ export class Particles {
     const cam = this._camPos;
 
     // — mist strength by time of day: heaviest just after dawn and at dusk —
-    const t = ctx.settings?.timeOfDay ?? 0.3;
-    const dawn = Math.exp(-((t - 0.255) ** 2) / 0.0016);
-    const dusk = Math.exp(-((t - 0.775) ** 2) / 0.0022);
-    const night = t < 0.20 || t > 0.86 ? 0.55 : 0;
-    const target = _clamp(dawn * 1.0 + dusk * 0.8 + night * 0.35, 0, 1);
-    this._mistAmount += (target - this._mistAmount) * Math.min(1, dt * 0.9);
+    const t = ctx.sky?.timeOfDay ?? ctx.settings?.timeOfDay ?? 0.3;
+    const dawn = Math.exp(-((t - 0.26) ** 2) / 0.0065);
+    const dusk = Math.exp(-((t - 0.78) ** 2) / 0.0075);
+    const night = t < 0.21 || t > 0.85 ? 0.6 : 0;
+    const target = _clamp(0.16 + dawn * 0.95 + dusk * 0.8 + night * 0.4, 0, 1.1);
+    if (this._mistInit) this._mistAmount += (target - this._mistAmount) * Math.min(1, dt * 2.2);
+    else { this._mistAmount = target; this._mistInit = true; }
 
     // — bed seeps: slow strings of bubbles from the river bed —
     this._seepAcc -= dt;
@@ -1133,7 +1137,7 @@ export class Particles {
         const surf = water?.heightAt ? water.heightAt(r.x, r.z) : level;
         const bx = r.x - r.dx * (r.r * 0.9);
         const bz = r.z - r.dz * (r.r * 0.9);
-        const inten = _clamp((r.speed - 1.2) * 0.6, 0.1, 1.0);
+        const inten = _clamp((r.speed - 0.8) * 0.55, 0.15, 1.0);
         this._v3.set(-r.dx, 0.8, -r.dz);
         this.sprayBurst(bx, surf + 0.05, bz, 2 + Math.round(inten * 3), inten * 0.7, this._v3);
         if (rng() < 0.25) this.mistPuff(bx, surf + 0.18 + rng() * 0.2, bz, 0.7 + inten, 0.10 + inten * 0.10);
@@ -1419,7 +1423,7 @@ export class Particles {
     const t = this.ctx.settings?.timeOfDay ?? 0.3;
     const day = _clamp((t - 0.18) * 6, 0, 1) * _clamp((0.88 - t) * 6, 0, 1);
     const low = 0.55 + 0.45 * Math.exp(-((t - 0.27) ** 2) / 0.006) + 0.45 * Math.exp(-((t - 0.76) ** 2) / 0.006);
-    return day * Math.min(1.25, low) * 0.9;
+    return day * Math.min(1.4, low) * 1.9;
   }
 
   _updateSheets(dt) {
@@ -1447,16 +1451,16 @@ export class Particles {
         if (persistent) {
           // mist banks: recycle around the camera along the river
           const dx = s.px[i] - cam.x, dz = s.pz[i] - cam.z;
-          if (dx * dx + dz * dz > 190 * 190) {
+          if (dx * dx + dz * dz > 95 * 95) {
             if (river) {
               const rc = river.toRiver(cam, this._rc);
-              const ns = rc.s + (rng() - 0.25) * 200;
+              const ns = rc.s + (rng() - 0.22) * 150;
               const nu = (rng() * 2 - 1) * 1.3;
               river.toWorld(ns, nu, 0, this._v3);
               s.px[i] = this._v3.x; s.pz[i] = this._v3.z;
             } else {
-              s.px[i] = cam.x + (rng() - 0.5) * 220;
-              s.pz[i] = cam.z + (rng() - 0.5) * 220;
+              s.px[i] = cam.x + (rng() - 0.5) * 130;
+              s.pz[i] = cam.z + (rng() - 0.5) * 130;
             }
             s.py[i] = level + 0.18 + rng() * 0.85;
             s.seed[i] = rng();
@@ -1497,7 +1501,7 @@ export class Particles {
       if (kind === S_CLOUD) {
         if (persistent) {
           life01 = 1;
-          alpha = mist * (0.16 + 0.12 * s.seed[i]);
+          alpha = mist * (0.34 + 0.24 * s.seed[i]);
           w = s.size[i]; h = s.a0[i];
         } else {
           const f = s.age[i] / s.life[i];
