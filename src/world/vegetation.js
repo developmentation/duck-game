@@ -30,9 +30,16 @@
  *   vegetation.windPhase                          scalar, advances with time
  *   vegetation.windDir                            Vector3 (unit, horizontal)
  *   vegetation.windStrength                       0..~1.4
+ *   vegetation.uniforms                           shared shader uniforms
  *   vegetation.group                              Object3D holding everything
  *   vegetation.trees                              the Trees instance (or null)
+ *   vegetation.coverAt(s, u)                      0..1 plant cover / weed bed
  *   vegetation.reedHeightAt(s, u)                 approx reed top above ground
+ *   vegetation.lilyPads                           [{x, z, size, rot}]
+ *
+ * Layer NO_REFLECT_LAYER (11) is "main camera only": grass, lilies and distant
+ * tree chunks live there so the water's planar reflection skips them. The main
+ * camera has the layer enabled in init(); see INTEGRATION_NOTES.md.
  */
 
 import * as THREE from 'three';

@@ -36,10 +36,10 @@ const lerp = THREE.MathUtils.lerp;
 
 const CHUNKS = 8;
 const CULL_DIST = 400;
-const SHADOW_DIST = 140;
+const SHADOW_DIST = 115;
 // Beyond this a tree contributes nothing readable to the planar water
 // reflection, so it is moved off the reflected layer entirely.
-const REFLECT_DIST = 150;
+const REFLECT_DIST = 115;
 
 // ── procedural leaf atlas ──────────────────────────────────────────────────
 
