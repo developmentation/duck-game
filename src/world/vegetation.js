@@ -116,13 +116,16 @@ function buildBlade({
     // colour ramp: cool at the base (in shadow / in water) → warm at the tip
     if (t < 0.5) c.copy(cBase).lerp(cMid, t * 2);
     else c.copy(cMid).lerp(cTip, (t - 0.5) * 2);
-    // the blade is a shallow V in cross-section: side normals splay outward so
-    // the blade shades like a curved surface instead of a flat card
-    const ny = 0.30 + t * 0.25;
+    // Normals lean HARD toward up. A blade is a flat card with a random yaw;
+    // if its normal points sideways then half the field faces away from the sun
+    // and reads as black spikes. Shading them like the ground they grow out of,
+    // with just enough sideways splay to keep the V cross-section, is what makes
+    // a reed bed read as lit grass rather than as a bundle of wires.
+    const ny = 1.55 + t * 0.85;
     for (let k = 0; k < 2; k++) {
       const sx = k === 0 ? -1 : 1;
       pos.push(sx * w, t, z);
-      const n = new THREE.Vector3(sx * 0.45, ny, -1).normalize();
+      const n = new THREE.Vector3(sx * 0.55, ny, -0.85).normalize();
       nrm.push(n.x, n.y, n.z);
       col.push(c.r, c.g, c.b);
       flag.push(0);
@@ -147,7 +150,7 @@ function buildBlade({
         for (let k = 0; k < 2; k++) {
           const sx = k === 0 ? -1 : 1;
           pos.push(dx * sx * w, t, z + dz * sx * w);
-          nrm.push(dx * sx * 0.5, 0.55, -0.6);
+          nrm.push(dx * sx * 0.35, 1.5, -0.45);
           col.push(cH.r * 1.18, cH.g * 1.12, cH.b * 0.9);
           flag.push(1);
         }
@@ -480,9 +483,9 @@ varying float vTip;`
       taper: 0.66,
       head: true,
       headWidth: 0.05,
-      baseColor: 0x2f4a38,
-      midColor: 0x5f7536,
-      tipColor: 0xb2a457,
+      baseColor: 0x3d5b41,
+      midColor: 0x6d8339,
+      tipColor: 0xc4b566,
     });
     this._geoms.push(geo);
 
@@ -495,8 +498,8 @@ varying float vTip;`
       bend: 0.30,
       fadeStart: 108,
       fadeEnd: 148,
-      trans: 1.55,
-      transPow: 2.6,
+      trans: 2.25,
+      transPow: 2.2,
     });
     this.reedMaterial = mat;
 
@@ -599,7 +602,7 @@ varying float vTip;`
       // Target elevation: reeds straddle the waterline, weed sits under it.
       const ty = submerged
         ? -lerp(0.45, 1.9, Math.min(1, rng() * rng() + 0.05))
-        : lerp(-1.05, 0.85, Math.pow(rng(), 0.9));
+        : lerp(-1.05, 0.38, Math.pow(rng(), 1.45));
       const a = this._uForElevation(lut, ty);
       const u = side * a;
       const groundY = river.bedHeight(s, u);
@@ -653,7 +656,7 @@ varying float vTip;`
         } else {
           // teal-green to honeyed ochre, biased by the dry-band noise
           green
-            .setRGB(0.52, 0.72, 0.42)
+            .setRGB(0.40, 0.58, 0.31)
             .lerp(this._sunTintTarget(), clamp(dry + (rng() - 0.5) * 0.4, 0, 1));
           col.copy(green).multiplyScalar(baseTint * (0.88 + rng() * 0.24));
         }
@@ -694,9 +697,9 @@ varying float vTip;`
       curve: 0.32,
       taper: 0.74,
       head: false,
-      baseColor: 0x2e4530,
-      midColor: 0x5e7436,
-      tipColor: 0xb2ad5c,
+      baseColor: 0x3c5636,
+      midColor: 0x66803a,
+      tipColor: 0xbdb463,
     });
     this._geoms.push(geo);
 
@@ -705,8 +708,8 @@ varying float vTip;`
       bend: 0.34,
       fadeStart: 30,
       fadeEnd: 46,
-      trans: 1.35,
-      transPow: 2.4,
+      trans: 1.85,
+      transPow: 2.2,
     });
     this.grassMaterial = mat;
 
@@ -747,9 +750,9 @@ varying float vTip;`
     const veg = this._grassVeg.array;
     const mesh = this.grassMesh;
 
-    const COOL = new THREE.Color(0x44603a);
-    const WARM = new THREE.Color(0x7b8b3f);
-    const DRY = new THREE.Color(0x9a8340);
+    const COOL = new THREE.Color(0x516c3e);
+    const WARM = new THREE.Color(0x8b9a46);
+    const DRY = new THREE.Color(0xac9352);
 
     let i = base;
     const end = base + n;
@@ -762,7 +765,7 @@ varying float vTip;`
       const side = rng() < 0.5 ? -1 : 1;
       // denser near the water, thinning inland
       const r = rng();
-      const inland = 0.7 + Math.pow(r, 1.9) * 27;
+      const inland = 0.5 + Math.pow(r, 1.9) * 27;
       const hw = river.halfWidth(s);
       const u = side * (1 + inland / hw);
 
@@ -772,7 +775,7 @@ varying float vTip;`
       if (rng() > cover * 0.95 + 0.05) continue;
 
       const y0 = river.bankHeight(s, u);
-      if (y0 < 0.10) continue;
+      if (y0 < 0.06) continue;
       // local slope along the inland axis so a clump sits flat on the ground
       const du = 0.9 / hw;
       const slope = (river.bankHeight(s, u + side * du) - y0) / 0.9;
