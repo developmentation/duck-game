@@ -333,6 +333,9 @@ export class Vegetation {
 
   async init() {
     const q = this.ctx.settings?.quality ?? {};
+    // main.js replaces ctx.camera with the camera *rig* once that system boots,
+    // so hold the real PerspectiveCamera from the engine.
+    this.camera = this.ctx.engine?.camera || this.ctx.camera;
     this.reedCount = Math.max(400, q.reedCount ?? 5200);
     this.grassCount = Math.max(1000, q.grassCount ?? 18000);
 
@@ -359,7 +362,7 @@ export class Vegetation {
 
     // Grass is 38k blades of sub-pixel detail in the reflection; skipping it
     // there buys back a whole pass worth of triangles and nobody can tell.
-    this.ctx.camera?.layers?.enable(NO_REFLECT_LAYER);
+    this.camera?.layers?.enable(NO_REFLECT_LAYER);
     const reflCam = this.ctx.water?._reflCam;
     if (reflCam?.layers) reflCam.layers.disable(NO_REFLECT_LAYER);
 
@@ -468,13 +471,14 @@ varying float vTip;`
   _buildReeds() {
     const geo = buildBlade({
       segments: 5,
-      width: 0.052,
-      curve: 0.24,
-      taper: 0.70,
+      width: 0.072,
+      curve: 0.26,
+      taper: 0.66,
       head: true,
+      headWidth: 0.05,
       baseColor: 0x2f4a38,
-      midColor: 0x5c7238,
-      tipColor: 0xa8a055,
+      midColor: 0x5f7536,
+      tipColor: 0xb2a457,
     });
     this._geoms.push(geo);
 
@@ -585,20 +589,20 @@ varying float vTip;`
       // Where the drifts are: low-frequency noise along the bank.
       const drift = noise.fbm2(s * 0.045, side * 21.7, 3);
       const density = smoothstep(drift, -0.34, 0.30);
-      if (!submerged && rng() > 0.10 + density * 0.92) continue;
+      if (!submerged && rng() > 0.16 + density * 0.92) continue;
 
       const lut = this._shoreLUT(s, side);
       // Target elevation: reeds straddle the waterline, weed sits under it.
       const ty = submerged
-        ? -lerp(0.55, 2.3, rng() * rng() + 0.05)
-        : lerp(-0.95, 0.62, Math.pow(rng(), 0.85));
+        ? -lerp(0.45, 1.9, Math.min(1, rng() * rng() + 0.05))
+        : lerp(-1.05, 0.85, Math.pow(rng(), 0.9));
       const a = this._uForElevation(lut, ty);
       const u = side * a;
       const groundY = river.bedHeight(s, u);
-      if (!submerged && groundY < -1.5) continue;
+      if (groundY < (submerged ? -2.6 : -1.5)) continue;
 
-      const clumpSize = submerged ? 2 + ((rng() * 3) | 0) : 3 + ((rng() * 6) | 0);
-      const clumpR = submerged ? 0.55 : 0.42 + rng() * 0.6;
+      const clumpSize = submerged ? 2 + ((rng() * 3) | 0) : 6 + ((rng() * 10) | 0);
+      const clumpR = submerged ? 0.55 : 0.34 + rng() * 0.55;
       const cW = river.halfWidth(s);
       // one clump-wide colour so drifts read as drifts, not as noise
       const dry = smoothstep(noise.fbm2(s * 0.02, side * 8.3 + 3.1, 2), -0.1, 0.5);
@@ -634,7 +638,7 @@ varying float vTip;`
         const yaw = rng() * Math.PI * 2;
         e.set(lean * (rng() - 0.5) * 2, yaw, lean * (rng() - 0.5) * 2, 'YXZ');
         q.setFromEuler(e);
-        const wide = (0.8 + rng() * 0.55) * (submerged ? 1.5 : 1);
+        const wide = (0.95 + rng() * 0.7) * (submerged ? 1.6 : 1);
         sc.set(wide, h, wide);
         m.compose(p, q, sc);
         mesh.setMatrixAt(i, m);
@@ -681,13 +685,13 @@ varying float vTip;`
   _buildGrass() {
     const geo = buildBlade({
       segments: 3,
-      width: 0.030,
-      curve: 0.30,
-      taper: 0.78,
+      width: 0.044,
+      curve: 0.32,
+      taper: 0.74,
       head: false,
       baseColor: 0x2e4530,
-      midColor: 0x5b7136,
-      tipColor: 0x93994c,
+      midColor: 0x5e7436,
+      tipColor: 0x9aa050,
     });
     this._geoms.push(geo);
 
@@ -753,7 +757,7 @@ varying float vTip;`
       const side = rng() < 0.5 ? -1 : 1;
       // denser near the water, thinning inland
       const r = rng();
-      const inland = 0.35 + Math.pow(r, 1.9) * 27;
+      const inland = 0.7 + Math.pow(r, 1.9) * 27;
       const hw = river.halfWidth(s);
       const u = side * (1 + inland / hw);
 
@@ -763,14 +767,14 @@ varying float vTip;`
       if (rng() > cover * 0.95 + 0.05) continue;
 
       const y0 = river.bankHeight(s, u);
-      if (y0 < 0.02) continue;
+      if (y0 < 0.10) continue;
       // local slope along the inland axis so a clump sits flat on the ground
       const du = 0.9 / hw;
       const slope = (river.bankHeight(s, u + side * du) - y0) / 0.9;
       if (Math.abs(slope) > 1.35) continue; // no grass on cliffs
 
-      const clumpN = 4 + ((rng() * 6) | 0);
-      const clumpR = 0.26 + rng() * 0.34;
+      const clumpN = 5 + ((rng() * 7) | 0);
+      const clumpR = 0.24 + rng() * 0.32;
       const shade = 0.82 + rng() * 0.36;
       const dryness = clamp(
         smoothstep(inland, 3, 26) * 0.75 +
@@ -785,7 +789,7 @@ varying float vTip;`
         river.toWorld(s + ds, uu, 0, p);
         p.y = y0 + slope * dInl - 0.03;
 
-        const h = lerp(0.16, 0.52, Math.pow(rng(), 1.4)) * (1 - dryness * 0.18);
+        const h = lerp(0.22, 0.78, Math.pow(rng(), 1.3)) * (1 - dryness * 0.18);
         const yaw = rng() * Math.PI * 2;
         e.set((rng() - 0.5) * 0.5, yaw, (rng() - 0.5) * 0.5, 'YXZ');
         q.setFromEuler(e);
@@ -901,7 +905,7 @@ varying float vTip;`
     const player = this.ctx.player;
     let s = 0;
     if (player?.riverCoord) s = player.riverCoord.s;
-    else if (this.ctx.camera) s = this.river.toRiver(this.ctx.camera.position, this._rc).s;
+    else if (this.camera) s = this.river.toRiver(this.camera.position, this._rc).s;
     // A teleport (or the very first fill) rebuilds every slab at once; ordinary
     // swimming only ever re-seeds a slab or two per frame.
     const jumped = Math.abs(s - this._lastBandS) > 120;
@@ -919,7 +923,7 @@ varying float vTip;`
     const u = this.uniforms;
     u.uWindPhase.value = this.windPhase;
     u.uWindStrength.value = this.windStrength;
-    const cam = this.ctx.camera;
+    const cam = this.camera;
     if (cam) {
       this._camPos.setFromMatrixPosition(cam.matrixWorld);
       u.uCamPos.value.copy(this._camPos);

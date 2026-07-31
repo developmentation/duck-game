@@ -211,6 +211,8 @@ export class Trees {
   async init() {
     const q = this.ctx.settings?.quality ?? {};
     this.count = Math.max(8, q.treeCount ?? 80);
+    // ctx.camera becomes the camera rig after boot; keep the real camera.
+    this.camera = this.ctx.engine?.camera || this.ctx.camera;
     this.noReflectLayer = this.shared.noReflectLayer ?? 11;
     this.atlas = makeLeafAtlas(q.name === 'low' ? 256 : 512, 5150);
     this.atlas.anisotropy = Math.min(4, this.ctx.engine?.maxAnisotropy ?? 1);
@@ -405,21 +407,21 @@ varying float vIsLeaf;`
       height = 5.4 + rng() * 3.4;
       trunkR = 0.20 + rng() * 0.13;
       levels = 3; spread = 0.78; upBias = 0.42;
-      crownR = 1.5 + rng() * 0.7; crownY = 0.62;
+      crownR = 1.9 + rng() * 0.9; crownY = 0.62;
       leanOut = 0.30 + rng() * 0.26;   // leans out over the water
       fronds = true;
     } else if (sp === 'slender') {
       height = 8.5 + rng() * 6.0;
       trunkR = 0.15 + rng() * 0.10;
       levels = 3; spread = 0.34; upBias = 0.80;
-      crownR = 1.0 + rng() * 0.5; crownY = 0.74;
+      crownR = 1.3 + rng() * 0.6; crownY = 0.74;
       leanOut = (rng() - 0.5) * 0.10;
       fronds = false;
     } else {
       height = 6.5 + rng() * 5.5;
       trunkR = 0.26 + rng() * 0.18;
       levels = 3; spread = 0.62; upBias = 0.40;
-      crownR = 1.7 + rng() * 0.9; crownY = 0.66;
+      crownR = 2.2 + rng() * 1.2; crownY = 0.66;
       leanOut = (rng() - 0.5) * 0.16;
       fronds = false;
     }
@@ -697,7 +699,7 @@ varying float vIsLeaf;`
   // ── per frame ────────────────────────────────────────────────────────────
 
   update(dt, elapsed) {
-    const cam = this.ctx.camera;
+    const cam = this.camera;
     if (!cam || !this.chunks.length) return;
     this._camPos.setFromMatrixPosition(cam.matrixWorld);
     for (const ch of this.chunks) {
