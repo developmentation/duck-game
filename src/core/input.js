@@ -68,9 +68,9 @@ export class Input {
         this._touchStart(e);
         return;
       }
-      if (e.button === 0 && !this.pointerLocked) {
-        this.dom.requestPointerLock?.();
-      }
+      // Deliberately NOT grabbing pointer lock: it swallows every later click,
+      // and clicking a destination is a primary way to play. Drag-to-look works
+      // unlocked, and pointer lock is policy-blocked in embedded contexts anyway.
       this.pressed[e.button === 2 ? 'aim' : 'primary'] = true;
       this.keys[e.button === 2 ? 'aim' : 'primary'] = true;
     });
@@ -154,7 +154,19 @@ export class Input {
   }
 
   _pollGamepad() {
-    const pads = navigator.getGamepads?.();
+    // Embedded contexts (the published artifact's iframe) disallow the gamepad
+    // permissions-policy feature and getGamepads() then throws on every call.
+    // Input.update() runs outside the per-system error guard in main.js, so this
+    // took every system's update down with it.
+    if (this._gamepadBlocked) return;
+    let pads = null;
+    try {
+      pads = navigator.getGamepads?.();
+    } catch {
+      this._gamepadBlocked = true;
+      console.info('[input] gamepad unavailable in this context, disabling polling');
+      return;
+    }
     if (!pads) return;
     for (const pad of pads) {
       if (!pad) continue;

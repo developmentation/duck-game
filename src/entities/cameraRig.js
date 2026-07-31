@@ -230,7 +230,11 @@ export class CameraRig {
     } else if (player && !looking) {
       // Follow the duck's heading. Faster when it is actually going somewhere,
       // but never zero: a parked duck should still end up nicely framed.
-      const rate = lerp(1.15, 3.4, clamp(speed / 4.5, 0, 1));
+      // Recentring must be SLOW while steering: the stick is read against the
+      // camera, so a camera that swings round as fast as the duck turns keeps
+      // moving the target the duck is turning toward.
+      const steering = !!(ctx.input?.move && Math.hypot(ctx.input.move.x, ctx.input.move.y) > 0.05);
+      const rate = steering ? 0.22 : lerp(1.15, 3.4, clamp(speed / 4.5, 0, 1));
       const d = wrapAngle((player.yaw ?? 0) - this.yaw);
       this.yaw = wrapAngle(this.yaw + d * (1 - Math.exp(-rate * dt)));
       // Pitch drifts back to the house angle, a touch lower when submerged.

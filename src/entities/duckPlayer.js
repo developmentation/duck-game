@@ -34,6 +34,13 @@ const EQ = settings.gravity / settings.buoyancy;
 const VERT_DRAG = 4.2;
 /** Body clearance when standing on the ground. */
 const LAND_LIFT = 0.085;
+
+/**
+ * Fraction of the river's current that acts on the player, 0..1. Ambient drift
+ * is lovely right up until it stops you steering; every other system still uses
+ * the full flow field.
+ */
+const CURRENT_AUTHORITY = 0.5;
 /** Depth (m) at which the duck counts as submerged / stops counting. */
 const SUB_ENTER = 0.20;
 const SUB_EXIT = 0.09;
@@ -165,6 +172,8 @@ export class DuckPlayer {
     this._flapCool = 0;
     this._justTeleported = 0;
     this._prevWaterY = 0;
+    this._preenT = 0;
+    this._dabbleT = 0;
 
     /* ---- scratch (no per-frame allocation) ---- */
     this._v0 = new THREE.Vector3();
@@ -332,6 +341,7 @@ export class DuckPlayer {
     /* ── input intents ────────────────────────────────────────────────── */
     let mx = 0, my = 0, sprint = false, diveHeld = false;
     let divePressed = false, flapPressed = false, quackPressed = false;
+    let interactPressed = false;
     if (input) {
       mx = input.move?.x ?? 0;
       my = input.move?.y ?? 0;
@@ -340,6 +350,7 @@ export class DuckPlayer {
       divePressed = input.justPressed?.('dive') ?? false;
       flapPressed = input.justPressed?.('flap') ?? false;
       quackPressed = input.justPressed?.('quack') ?? false;
+      interactPressed = input.justPressed?.('interact') ?? false;
     }
     const inputMag = Math.min(1, Math.hypot(mx, my));
     const hasInput = inputMag > 0.02 || divePressed || flapPressed;
@@ -394,7 +405,9 @@ export class DuckPlayer {
       river.flowAt(rc.s, rc.u, this._flow);
       // A floating duck only presents its draft to the current; a submerged one
       // gets the lot. Near the bed the water barely moves.
-      const bite = this.submerged ? 1 - clamp((depth - 0.4) / 3.0, 0, 0.5) : 0.62;
+      // Playtest: at full strength the current simply took the duck away.
+      const bite = (this.submerged ? 1 - clamp((depth - 0.4) / 3.0, 0, 0.5) : 0.62)
+        * CURRENT_AUTHORITY;
       this._flow.multiplyScalar(bite);
     } else {
       this._flow.set(0, 0, 0);
@@ -475,6 +488,10 @@ export class DuckPlayer {
     this._emitWake(dt, waterY, overWater);
     this._emitBubbles(dt);
     if (quackPressed) this._quack();
+    if (interactPressed) this._interact(localDepth, overWater);
+    // Timed grooming poses run themselves down.
+    if (this._preenT > 0) this._preenT = Math.max(0, this._preenT - dt);
+    if (this._dabbleT > 0) this._dabbleT = Math.max(0, this._dabbleT - dt);
 
     /* ── drive the model ──────────────────────────────────────────────── */
     this._applyTransform();
@@ -664,8 +681,17 @@ export class DuckPlayer {
 
   /* ─────────────────────────────── helpers ───────────────────────────────── */
 
-  _steer(dt, targetYaw, maxRate) {
-    const d = wrapAngle(targetYaw - this.yaw);
+  _steer(dt, targetYaw, maxRate, deadband = 0.13) {
+    let d = wrapAngle(targetYaw - this.yaw);
+    // The steering target comes from the camera azimuth and the camera follows
+    // the duck, so a residual error of a couple of degrees feeds itself and the
+    // pair winds into a slow spin with forward held.
+    if (Math.abs(d) < deadband) {
+      this._yawVel *= Math.exp(-6 * dt);
+      this.yaw = wrapAngle(this.yaw + this._yawVel * dt);
+      return;
+    }
+    d -= Math.sign(d) * deadband;
     const stiff = 26, damp = 7.2;
     this._yawVel += (d * stiff - this._yawVel * damp) * dt;
     this._yawVel = clamp(this._yawVel, -maxRate, maxRate);
@@ -745,6 +771,31 @@ export class DuckPlayer {
     return 'float';
   }
 
+  /**
+   * The E key. It was mapped to 'interact' and read by nobody, so the key and
+   * every on-screen prompt for it did nothing.
+   *
+   * Context decides the verb, which is how a one-button interact should behave:
+   * up-end and dabble where the water is shallow enough to reach the bottom,
+   * preen anywhere else on the surface. Underwater it does nothing — the duck
+   * has its bill full.
+   */
+  _interact(localDepth, overWater) {
+    if (this.submerged) return;
+    const ctx = this.ctx;
+    if (overWater && localDepth > 0.35 && localDepth < 1.15) {
+      this._dabbleT = 2.6;
+      ctx.events?.emit(ctx.EVENTS.TOAST, { text: 'Dabbling for weed', icon: '\u{1F343}', duration: 1.4 });
+      ctx.events?.emit(ctx.EVENTS.SFX, { name: 'dabble', position: this.position.clone(), volume: 0.6 });
+      ctx.water?.addRipple?.(this.position.x, this.position.z, 0.5, 0.9);
+    } else {
+      this._preenT = 3.0;
+      this.wetness = Math.max(0, this.wetness - 0.45);
+      ctx.events?.emit(ctx.EVENTS.TOAST, { text: 'Preening', icon: '\u{1FAB6}', duration: 1.4 });
+      ctx.events?.emit(ctx.EVENTS.SFX, { name: 'preen', position: this.position.clone(), volume: 0.5 });
+    }
+  }
+
   _cameraBasis() {
     const cam = this.ctx.engine?.camera;
     if (!cam) return;
@@ -754,7 +805,10 @@ export class DuckPlayer {
     this._camFwd.set(-e[8], 0, -e[10]);
     if (this._camFwd.lengthSq() < 1e-6) this._camFwd.set(0, 0, 1);
     this._camFwd.normalize();
-    this._camRight.set(this._camFwd.z, 0, -this._camFwd.x);
+    // Right of forward is fwd x up = (-fwd.z, 0, fwd.x). The original was the
+    // negation of that, i.e. LEFT, so A and D were swapped and every lateral
+    // correction pushed the duck the wrong way.
+    this._camRight.set(-this._camFwd.z, 0, this._camFwd.x);
   }
 
   _enterSubmerged(sub) {
@@ -876,6 +930,9 @@ export class DuckPlayer {
     p.submerged = this.submerged ? 1 : 0;
     p.wetness = this.wetness;
     p.flap = false;
+    // Ease in and out so the pose blends rather than snapping on.
+    p.preen = this._preenT > 0 ? clamp(Math.min(this._preenT, 0.45) / 0.45, 0, 1) : 0;
+    p.dabble = this._dabbleT > 0 ? clamp(Math.min(this._dabbleT, 0.4) / 0.4, 0, 1) : 0;
     p.alert = this.grounded ? 0.45 : 0;
     // Standing on the bank is a different silhouette: upright, neck out.
     const pose = this.grounded && !this.submerged ? 'stand'

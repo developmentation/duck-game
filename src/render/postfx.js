@@ -1011,6 +1011,14 @@ const GRADE_KEYS = [
 
 const lerp = (a, b, t) => a + (b - a) * t;
 
+/**
+ * Global multiplier on screen-space sun shafts.
+ *
+ * Playtest verdict was blunt: the shafts blinded everything, above water and
+ * especially below it. Kept as an effect, dialled to roughly a third.
+ */
+const GODRAY_GAIN = 0.3;
+
 /* ────────────────────────────────────────────────────────────────────────── */
 
 export class PostFX {
@@ -1306,7 +1314,9 @@ export class PostFX {
     this.sunOnScreen = vis;
 
     if (this.godrays) {
-      const s = vis * this.params.godrayScale * (1 + this.wet * 1.6);
+      // Playtest: shafts blinded the frame. Down to ~30%, and ATTENUATED when
+      // submerged rather than boosted 2.6x, which was an unusable white-out.
+      const s = vis * this.params.godrayScale * GODRAY_GAIN * (1 - this.wet * 0.55);
       this.godrays.enabled = s > 0.01;
       if (this.godrays.enabled) {
         if (this.debugSunUV) this.godrays.sunUniform.value.set(this.debugSunUV.x, this.debugSunUV.y);
