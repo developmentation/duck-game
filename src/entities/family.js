@@ -409,8 +409,10 @@ export class Family {
 
     const ctx = this.ctx;
     const player = ctx.player || ctx.get?.('player');
-    const cam = ctx.camera;
-    if (cam) {
+    // ctx.camera may be the camera rig rather than the camera itself.
+    let cam = ctx.camera;
+    if (cam && !cam.isCamera) cam = cam.camera || cam.object || ctx.engine?.camera;
+    if (cam && cam.isCamera) {
       this._camPos.setFromMatrixPosition(cam.matrixWorld);
       this._projScreen.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
       this._frustum.setFromProjectionMatrix(this._projScreen);

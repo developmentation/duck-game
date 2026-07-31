@@ -149,7 +149,9 @@ export class Particles {
     this._wind = new THREE.Vector3();
     this._camPos = new THREE.Vector3();
     this._camFwd = new THREE.Vector3();
-    this._sunView = new THREE.Vector3();
+    this._sunView = new THREE.Vector3(0, 0.62, -0.78).normalize();
+    this._rc = { s: 0, u: 0, distance: 0 };
+    this._runoff = 0;
     this._col = new THREE.Color();
 
     this._elapsed = 0;
@@ -228,11 +230,13 @@ export class Particles {
 
   _pointsMesh(count, extra, material, renderOrder) {
     const geo = new THREE.BufferGeometry();
-    const pos = new Float32Array(count * 3);
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const pos = new THREE.BufferAttribute(new Float32Array(count * 3), 3);
+    pos.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute('position', pos);
     const attrs = { position: geo.attributes.position };
     for (const [name, itemSize] of extra) {
       const a = new THREE.BufferAttribute(new Float32Array(count * itemSize), itemSize);
+      a.setUsage(THREE.DynamicDrawUsage);
       geo.setAttribute(name, a);
       attrs[name] = a;
     }
@@ -477,7 +481,7 @@ export class Particles {
     geo.index = base.index;
     geo.setAttribute('position', base.attributes.position);
     geo.setAttribute('uv', base.attributes.uv);
-    base.dispose();
+    this._sheetBase = base;   // shares its buffers — dispose it, not them, at the end
 
     const mk = (name, size) => {
       const a = new THREE.InstancedBufferAttribute(new Float32Array(max * size), size);
@@ -788,11 +792,10 @@ export class Particles {
   }
 
   _sheetColor(idx, color) {
-    if (!this._sheetCols) this._sheetCols = new Float32Array(this.sheetMax * 3);
-    const c = color || this._defaultFoam;
-    this._sheetCols[idx * 3] = c ? c.r : 0.85;
-    this._sheetCols[idx * 3 + 1] = c ? c.g : 0.92;
-    this._sheetCols[idx * 3 + 2] = c ? c.b : 0.96;
+    const s = this.sheets;
+    s.c0[idx] = color ? color.r : 0.86;
+    s.c1[idx] = color ? color.g : 0.92;
+    s.c2[idx] = color ? color.b : 0.97;
   }
 
   _sheetRing(x, y, z, radius, strength, color) {
@@ -814,7 +817,7 @@ export class Particles {
     if (i >= 0) {
       const s = this.sheets;
       s.vx[i] = (rng() - 0.5) * 0.05;
-      s.vy[i] = 0.004 + rng() * 0.01;
+      s.vy[i] = persistent ? 0.0 : 0.16 + rng() * 0.34;
       s.vz[i] = (rng() - 0.5) * 0.05;
       s.a2[i] = 0;
       s.a1[i] = amount;
@@ -936,13 +939,14 @@ export class Particles {
 
   /** duck.onSpray fires once when the duck surfaces and shakes. */
   _hookSpray() {
-    const duck = this.ctx.get?.('player')?.duck;
+    const player = this.ctx.get?.('player');
+    const duck = player?.duck;
     if (!duck || this._sprayHooked) return;
     this._sprayHooked = true;
     const prev = duck.onSpray;
     duck.onSpray = () => {
       try { prev?.(); } catch (e) { /* keep ours alive */ }
-      const p = duck.headPosition ? duck.headPosition(this._v1) : this.ctx.get('player')?.position;
+      const p = player.headPosition ? player.headPosition(this._v1) : player.position;
       if (!p) return;
       const rng = this.rng;
       // a ring of spray thrown sideways off the head
@@ -1006,7 +1010,7 @@ export class Particles {
       const p = r.position;
       if (!p) continue;
       if (p.y < -0.55 || p.y > 1.1) continue;      // must break the surface
-      const rc = river.toRiver(p, this._v1);
+      const rc = river.toRiver(p, this._rc);
       const flow = river.flowAt(rc.s, rc.u, this._v2);
       const speed = flow.length();
       if (speed < 1.35) continue;
@@ -1104,7 +1108,7 @@ export class Particles {
     this._seepAcc -= dt;
     if (this._seepAcc <= 0 && river) {
       this._seepAcc = 0.5 + rng() * 1.1;
-      const rc = river.toRiver(cam, this._v1);
+      const rc = river.toRiver(cam, this._rc);
       const s = rc.s + (rng() - 0.35) * 26;
       const u = (rng() * 2 - 1) * 0.8;
       const depth = river.depth(s, u);
@@ -1445,7 +1449,7 @@ export class Particles {
           const dx = s.px[i] - cam.x, dz = s.pz[i] - cam.z;
           if (dx * dx + dz * dz > 190 * 190) {
             if (river) {
-              const rc = river.toRiver(cam, this._v2);
+              const rc = river.toRiver(cam, this._rc);
               const ns = rc.s + (rng() - 0.25) * 200;
               const nu = (rng() * 2 - 1) * 1.3;
               river.toWorld(ns, nu, 0, this._v3);
@@ -1458,7 +1462,7 @@ export class Particles {
             s.seed[i] = rng();
           }
         } else {
-          s.py[i] += s.vy[i] * dt * 6;
+          s.py[i] += s.vy[i] * dt;
           s.size[i] += dt * 0.5;
         }
       } else if (kind === S_RING) {
@@ -1482,7 +1486,6 @@ export class Particles {
     const A = this.sheetAttrs;
     const iPos = A.iPos.array, iSize = A.iSize.array;
     const iParams = A.iParams.array, iParams2 = A.iParams2.array, iColor = A.iColor.array;
-    const cols = this._sheetCols;
     const mist = this._mistAmount;
 
     for (let k = 0; k < n; k++) {
@@ -1527,11 +1530,7 @@ export class Particles {
       iParams2[k * 4 + 1] = s.a2[i];
       iParams2[k * 4 + 2] = ring;
       iParams2[k * 4 + 3] = 0;
-      if (cols) {
-        iColor[k * 3] = cols[i * 3]; iColor[k * 3 + 1] = cols[i * 3 + 1]; iColor[k * 3 + 2] = cols[i * 3 + 2];
-      } else {
-        iColor[k * 3] = 0.86; iColor[k * 3 + 1] = 0.92; iColor[k * 3 + 2] = 0.96;
-      }
+      iColor[k * 3] = s.c0[i]; iColor[k * 3 + 1] = s.c1[i]; iColor[k * 3 + 2] = s.c2[i];
     }
     this._sheetDraw = n;
   }
@@ -1588,6 +1587,7 @@ export class Particles {
     this.dropGeo?.dispose();
     this.moteGeo?.dispose();
     this.sheetGeo?.dispose();
+    this._sheetBase?.dispose();
     this._blankDepth?.dispose();
     this._materials = [];
     this.bubbles = this.drops = this.motes = this.sheets = null;
