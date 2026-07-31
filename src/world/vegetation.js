@@ -651,14 +651,16 @@ varying float vTip;`
         m.compose(p, q, sc);
         mesh.setMatrixAt(i, m);
 
+        // instanceColor is a TINT around 1.0, not an albedo: the geometry
+        // already carries the base→tip colour ramp, and multiplying two dark
+        // albedos together is what turns a reed bed into black wire.
         if (submerged) {
-          col.setRGB(0.16, 0.30, 0.24).multiplyScalar(0.75 + rng() * 0.5);
+          col.setRGB(0.58, 0.92, 0.76).multiplyScalar(0.80 + rng() * 0.35);
         } else {
-          // teal-green to honeyed ochre, biased by the dry-band noise
           green
-            .setRGB(0.40, 0.58, 0.31)
+            .setRGB(0.82, 1.04, 0.78)
             .lerp(this._sunTintTarget(), clamp(dry + (rng() - 0.5) * 0.4, 0, 1));
-          col.copy(green).multiplyScalar(baseTint * (0.88 + rng() * 0.24));
+          col.copy(green).multiplyScalar(baseTint * (0.90 + rng() * 0.20));
         }
         mesh.setColorAt(i, col);
 
@@ -684,8 +686,9 @@ varying float vTip;`
     for (; i < end; i++) mesh.setMatrixAt(i, m);
   }
 
+  /** Honeyed tint the dry reed bands lean toward. Multiplies, never replaces. */
   _sunTintTarget() {
-    return this.__dryCol || (this.__dryCol = new THREE.Color(1.02, 0.86, 0.42));
+    return this.__dryCol || (this.__dryCol = new THREE.Color(1.34, 1.06, 0.58));
   }
 
   // ── bank grass ───────────────────────────────────────────────────────────
@@ -750,9 +753,10 @@ varying float vTip;`
     const veg = this._grassVeg.array;
     const mesh = this.grassMesh;
 
-    const COOL = new THREE.Color(0x516c3e);
-    const WARM = new THREE.Color(0x8b9a46);
-    const DRY = new THREE.Color(0xac9352);
+    // Tints around 1.0 — see the note in _fillReedSlab.
+    const COOL = new THREE.Color(0.80, 1.02, 0.80);
+    const WARM = new THREE.Color(1.06, 1.05, 0.74);
+    const DRY = new THREE.Color(1.34, 1.02, 0.56);
 
     let i = base;
     const end = base + n;
@@ -783,7 +787,7 @@ varying float vTip;`
 
       const clumpN = 5 + ((rng() * 7) | 0);
       const clumpR = 0.24 + rng() * 0.32;
-      const shade = 0.82 + rng() * 0.36;
+      const shade = 0.88 + rng() * 0.26;
       const dryness = clamp(
         smoothstep(inland, 3, 26) * 0.75 +
         noise.fbm2(s * 0.012, side * 3.7, 2) * 0.4 + 0.15, 0, 1);
@@ -806,7 +810,7 @@ varying float vTip;`
         m.compose(p, q, sc);
         mesh.setMatrixAt(i, m);
 
-        col.copy(tmp).multiplyScalar(shade * (0.86 + rng() * 0.3));
+        col.copy(tmp).multiplyScalar(shade * (0.90 + rng() * 0.22));
         mesh.setColorAt(i, col);
 
         const o4 = i * 4;
@@ -880,8 +884,8 @@ varying float vTip;`
         sc.set(size, size * 1.15, size);
         m.compose(p, q, sc);
         mesh.setMatrixAt(i, m);
-        if (weedy) col.setRGB(0.36, 0.55, 0.24).multiplyScalar(0.8 + rng() * 0.5);
-        else col.setRGB(0.72, 0.86, 0.6).multiplyScalar(0.72 + rng() * 0.45);
+        if (weedy) col.setRGB(0.78, 1.02, 0.66).multiplyScalar(0.8 + rng() * 0.4);
+        else col.setRGB(1.00, 1.08, 0.86).multiplyScalar(0.82 + rng() * 0.32);
         mesh.setColorAt(i, col);
         const o4 = i * 4;
         aVeg.array[o4] = rng();
