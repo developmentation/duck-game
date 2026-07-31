@@ -95,6 +95,7 @@ const SPECIES_DEFS = [
     waveStart: 0.16,
     rises: 1.0,
     solitary: false,
+    viewRange: 30,
   },
   {
     key: 'perch',
@@ -150,6 +151,7 @@ const SPECIES_DEFS = [
     waveStart: 0.24,
     rises: 0.45,
     solitary: false,
+    viewRange: 46,
   },
   {
     key: 'pike',
@@ -205,6 +207,7 @@ const SPECIES_DEFS = [
     waveStart: 0.32,
     rises: 0.0,
     solitary: true,
+    viewRange: 70,
   },
   {
     key: 'loach',
@@ -261,6 +264,7 @@ const SPECIES_DEFS = [
     rises: 0.0,
     solitary: false,
     bedHugger: true,
+    viewRange: 26,
   },
 ];
 
@@ -1323,10 +1327,12 @@ export class FishSchools {
     const camX = this._camPos.x;
     const camY = this._camPos.y;
     const camZ = this._camPos.z;
-    const far = this.renderRange;
-    const far2 = far * far;
-    const fadeStart = (far - 12) * (far - 12);
     for (const sp of this.species) {
+      // Each species disappears at the range where it stops being a shape and
+      // starts being a speck — a sub-pixel minnow is just aliasing noise.
+      const far = Math.min(this.renderRange, sp.def.viewRange ?? this.renderRange);
+      const far2 = far * far;
+      const fadeStart = (far * 0.72) * (far * 0.72);
       const P = sp.aPos.array;
       const O = sp.aOrient.array;
       const A = sp.aAnim.array;
