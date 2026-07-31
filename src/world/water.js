@@ -646,7 +646,7 @@ export class Water {
    */
   addRipple(x, z, strength = 0.08, radius = 2.0, kind = 0, dirx = 0, dirz = 1) {
     if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
-    const str = Math.min(0.45, Math.max(0.004, strength));
+    const str = Math.min(0.32, Math.max(0.004, strength));
     const slot = this._claimSlot(str);
     if (!slot) return null;
     slot.x = x;

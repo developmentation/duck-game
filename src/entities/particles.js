@@ -325,7 +325,7 @@ export class Particles {
 
           float a = (shell + spec * 0.95 + caustic * 0.45) * vFade;
           a *= 1.0 - smoothstep(0.96, 1.0, r) * 0.5;
-          a *= softFade(vZ, 0.35);
+          a *= softFade(vZ, 0.10);
           float fog = fogAmount(vZ);
           col = mix(col, uFogColor, fog * 0.7);
           a *= 1.0 - fog * 0.75;
@@ -410,7 +410,7 @@ export class Particles {
             a = body * 0.72 * vFade;
           }
 
-          a *= softFade(vZ, 0.30);
+          a *= softFade(vZ, 0.10);
           float fog = fogAmount(vZ);
           col = mix(col, uFogColor, fog * 0.75);
           a *= 1.0 - fog * 0.8;
@@ -462,7 +462,7 @@ export class Particles {
           vec3 cool = mix(uAmbient, uFogColor, 0.5);
           vec3 col = mix(cool, warm, vWarm);
           float a = (halo * 0.55 + core * 0.75) * vFade;
-          a *= softFade(vZ, 0.6);
+          a *= softFade(vZ, 0.22);
           float fog = fogAmount(vZ);
           a *= 1.0 - fog * 0.85;
           if (a <= 0.003) discard;
@@ -574,7 +574,7 @@ export class Particles {
           } else if (kind < 1.5) {
             // expanding foam / marker ring
             float ring = vP2.z;
-            float w = 0.055 + 0.075 * (1.0 - life);
+            float w = 0.075 + 0.10 * (1.0 - life);
             float band = 1.0 - smoothstep(0.0, w, abs(r - ring));
             band *= band;
             float wob = 0.72 + 0.28 * vnoise(vec2(atan(p.y, p.x) * 2.4 + seed * 20.0, seed * 8.0));
@@ -600,7 +600,10 @@ export class Particles {
           }
 
           if (vP2.w > 0.5) a *= smoothstep(7.0, 22.0, vZ);
-          a *= softFade(vZ, kind < 0.5 ? 2.6 : (kind < 1.5 ? 0.22 : 0.7));
+          // rings are surface decals: a depth fade would erase them against the
+          // very surface they lie on, so only the volumetric kinds get one.
+          if (kind < 0.5) a *= softFade(vZ, 2.6);
+          else if (kind > 1.5) a *= softFade(vZ, 0.25);
           float fog = fogAmount(vZ);
           col = mix(col, uFogColor, fog * 0.65);
           a *= 1.0 - fog * 0.6;

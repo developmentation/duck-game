@@ -141,8 +141,23 @@ export function evalWaves(px, pz, t, fdx, fdz, fspeed, amp, out) {
 
 // Ripples: expanding rings from a small ring buffer of sources. Same wavelet on
 // both sides so heightAt() feels the splash the player sees.
+//
+// Two properties are load bearing for the *physics*, not just the look:
+//
+//   * a ring has no displacement at its own origin. The naive packet
+//     exp(-(d - r0)^2 / w^2) is at full crest when d = 0 and r0 = 0, so a ring
+//     emitted under the duck instantly lifts the reported surface by its whole
+//     amplitude. Splashes are emitted at the duck's feet on every dive/surface
+//     transition, so that lift re-triggered the transition, which emitted more
+//     rings: `heightAt` ran away to over a metre of phantom swell and the duck
+//     was permanently "submerged". `grow` ramps the ring in as it leaves the
+//     source and the inward-narrow packet keeps the relaxed water inside it flat.
+//   * the sum is clamped. Four co-located rings used to add linearly.
 const RIPPLE_LAMBDA = 0.95;
 const RIPPLE_DECAY = 1.5;
+const RIPPLE_GROW = 0.45;   // metres of ring radius before it reaches full amplitude
+const RIPPLE_INNER = 0.55;  // packet width inside the ring, as a fraction of w
+export const RIPPLE_H_MAX = 0.26;  // metres, hard cap on the summed ring height
 
 const RIPPLE_GLSL = /* glsl */ `
 uniform vec4 uRipA[NR];   // xy centre, z age (s), w strength
@@ -162,8 +177,11 @@ void ripplesAt(vec2 p, out float h, out float foam, out vec2 grad) {
     float w = 0.5 + 0.5 * A.z;
     float x = sqrt(d2) - r0;
     if (abs(x) > w * 2.6) continue;
-    float e = exp(-(x * x) / (w * w));
-    float amp = A.w * exp(-${RIPPLE_DECAY.toFixed(2)} * A.z);
+    // Narrower on the inside: water the ring has already crossed has relaxed.
+    float ww = x < 0.0 ? w * ${RIPPLE_INNER.toFixed(3)} : w;
+    float e = exp(-(x * x) / (ww * ww));
+    float grow = smoothstep(0.0, ${RIPPLE_GROW.toFixed(3)}, r0);
+    float amp = A.w * exp(-${RIPPLE_DECAY.toFixed(2)} * A.z) * grow;
     if (B.y > 0.5) {
       // Kelvin wake: emphasise the classic 19.5 degree shoulder behind the duck
       vec2 rd = rel * inversesqrt(max(d2, 1e-6));
@@ -174,9 +192,11 @@ void ripplesAt(vec2 p, out float h, out float foam, out vec2 grad) {
     float ph = k * x;
     float cs = cos(ph), sn = sin(ph);
     h += amp * cs * e;
-    grad += rel * inversesqrt(max(d2, 1e-6)) * amp * e * (-k * sn - 2.0 * x * cs / (w * w));
-    foam += A.w * 3.5 * exp(-1.4 * A.z) * exp(-(x * x) / (w * w * 1.5));
+    grad += rel * inversesqrt(max(d2, 1e-6)) * amp * e * (-k * sn - 2.0 * x * cs / (ww * ww));
+    foam += A.w * 3.5 * exp(-1.4 * A.z) * smoothstep(0.0, 0.30, r0)
+          * exp(-(x * x) / (w * w * 1.5));
   }
+  h = clamp(h, -${RIPPLE_H_MAX.toFixed(3)}, ${RIPPLE_H_MAX.toFixed(3)});
 }
 `;
 
@@ -192,17 +212,24 @@ export function evalRipples(list, px, pz, out) {
     const w = 0.5 + 0.5 * r.age;
     const x = d - r0;
     if (Math.abs(x) > w * 2.6) continue;
-    const e = Math.exp(-(x * x) / (w * w));
-    let amp = r.strength * Math.exp(-RIPPLE_DECAY * r.age);
+    const ww = x < 0 ? w * RIPPLE_INNER : w;
+    const e = Math.exp(-(x * x) / (ww * ww));
+    let g0 = r0 / RIPPLE_GROW;
+    g0 = g0 < 0 ? 0 : g0 > 1 ? 1 : g0;
+    const grow = g0 * g0 * (3 - 2 * g0);
+    let amp = r.strength * Math.exp(-RIPPLE_DECAY * r.age) * grow;
     if (r.kind > 0.5) {
       const g = ((rx / d) * -r.dirx + (rz / d) * -r.dirz - 0.94) * 5.0;
       amp *= 0.22 + 1.15 * Math.exp(-g * g);
     }
     const k = 6.28318530718 / RIPPLE_LAMBDA;
     h += amp * Math.cos(k * x) * e;
-    foam += r.strength * 3.5 * Math.exp(-1.4 * r.age) * Math.exp(-(x * x) / (w * w * 1.5));
+    let f0 = r0 / 0.30;
+    f0 = f0 < 0 ? 0 : f0 > 1 ? 1 : f0;
+    foam += r.strength * 3.5 * Math.exp(-1.4 * r.age) * (f0 * f0 * (3 - 2 * f0))
+      * Math.exp(-(x * x) / (w * w * 1.5));
   }
-  out.h = h;
+  out.h = h < -RIPPLE_H_MAX ? -RIPPLE_H_MAX : h > RIPPLE_H_MAX ? RIPPLE_H_MAX : h;
   out.foam = foam;
   return out;
 }
