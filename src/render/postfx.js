@@ -205,7 +205,11 @@ class BloomPass extends Pass {
         tDiffuse: { value: null },
         uThreshold: { value: 1.15 },
         uKnee: { value: 0.70 },
-        uClamp: { value: 32.0 },
+        // Bloom source clamp. The sun disc is a ~260 HDR value; at 32 this still
+        // fed 28x the bloom threshold into the blur, and looking anywhere near
+        // the sun washed the whole frame to white. Bright enough to glare,
+        // bounded enough to keep the picture.
+        uClamp: { value: 7.0 },
       },
       vertexShader: VERT,
       fragmentShader: /* glsl */ `
@@ -1000,10 +1004,10 @@ const GRADE_KEYS = [
     vignette: 0.20, bloom: 0.50, bloomTint: [1.0, 0.89, 0.72], grain: 0.011 },
   { t: 0.68, exposure: 1.0, contrast: 0.36, saturation: 1.11, toe: 0.018,
     toeTint: [0.34, 0.62, 0.82], shadow: [0.86, 0.99, 1.09], high: [1.09, 0.99, 0.86],
-    vignette: 0.24, bloom: 0.66, bloomTint: [1.0, 0.77, 0.50], grain: 0.012 },
+    vignette: 0.24, bloom: 0.50, bloomTint: [1.0, 0.77, 0.50], grain: 0.012 },
   { t: 0.78, exposure: 1.03, contrast: 0.36, saturation: 1.13, toe: 0.024,
     toeTint: [0.32, 0.56, 0.84], shadow: [0.82, 0.95, 1.14], high: [1.14, 0.96, 0.78],
-    vignette: 0.28, bloom: 0.82, bloomTint: [1.0, 0.66, 0.40], grain: 0.015 },
+    vignette: 0.28, bloom: 0.58, bloomTint: [1.0, 0.66, 0.40], grain: 0.015 },
   { t: 1.00, exposure: 1.06, contrast: 0.24, saturation: 0.94, toe: 0.040,
     toeTint: [0.30, 0.55, 0.86], shadow: [0.80, 0.94, 1.14], high: [0.92, 0.98, 1.10],
     vignette: 0.34, bloom: 0.60, bloomTint: [0.72, 0.84, 1.0], grain: 0.018 },

@@ -226,7 +226,9 @@ const S_GROUND = [ // colour the dome fades to below the horizon
 const NIGHT_COLOR = [0.0090, 0.0135, 0.0300];
 
 export const SUN_INTENSITY = 18.0;
-export const SUN_DISC_INTENSITY = 260.0;
+// Lowered from 260: combined with the bloom clamp this keeps a hot, glaring
+// disc without turning the frame white whenever the sun is in shot.
+export const SUN_DISC_INTENSITY = 150.0;
 export const SUN_ANG_RAD = 0.0165; // ~0.95 degrees, a touch bigger than real
 export const MS_STRENGTH = 0.044;
 export const HAZE_FALLOFF = 7.5;
