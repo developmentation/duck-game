@@ -1136,11 +1136,17 @@ export class FishSchools {
       // --- hold station facing upstream, in the water's frame ---------------
       // The fish wants a small velocity relative to the water, pointing
       // upstream. Add the flow back and its world velocity is near zero.
+      // Holding station means swimming upstream at exactly the speed of the
+      // water, so the tail works hard while the fish goes nowhere. The gain is
+      // compensated for the drag below, or the steady state falls short and
+      // the whole shoal washes downstream.
       const wobble = Math.sin(this._time * 0.7 + sp.phase[i] * 3.1);
-      const desiredRelX = -fdx * cruise + rx * wobble * cruise * 0.5;
-      const desiredRelZ = -fdz * cruise + rz * wobble * cruise * 0.5;
-      ax += (desiredRelX - (vx[i] - flowX)) * 1.7;
-      az += (desiredRelZ - (vz[i] - flowZ)) * 1.7;
+      const hold = fmag * (0.92 + sp.cvar[i] * 0.16);
+      const comp = (5.0 + 1.6) / 5.0;
+      const desiredRelX = (-fdx * hold + rx * wobble * cruise * 0.5) * comp;
+      const desiredRelZ = (-fdz * hold + rz * wobble * cruise * 0.5) * comp;
+      ax += (desiredRelX - (vx[i] - flowX)) * 5.0;
+      az += (desiredRelZ - (vz[i] - flowZ)) * 5.0;
 
       // --- home spring: shoals hold their lie --------------------------------
       const hx = sh.cx - px[i];
@@ -1204,7 +1210,7 @@ export class FishSchools {
       }
 
       // --- burst -------------------------------------------------------------
-      let relMax = cruise * 1.7;
+      let relMax = Math.max(cruise * 1.7, fmag * 1.55);
       const bu = sp.burst[i];
       if (bu > 0.01) {
         ax += sp.bfx[i] * bu * 26;

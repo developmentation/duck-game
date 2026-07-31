@@ -68,3 +68,46 @@ Notes for other systems (no change needed from you):
   never coplanar. A real half-in/half-out frame needs a screen-space mask in
   `postfx` driven by the surface height at the near plane — `rig.eyeDepth`
   (metres of eye below the surface, 0 when above) is published for that.
+
+## fish (`src/entities/fish.js`)
+
+No changes needed in files I do not own. What other systems can use:
+
+```js
+const fish = ctx.get('fish');
+fish.count            // fish currently simulated (streamed, ~100-200 near you)
+fish.population       // total the river holds across all shoals (~1300)
+fish.drawnCount       // instances actually submitted this frame
+fish.speciesInfo      // [{ key, name, color, length }] for HUD / lessons
+fish.nearest(pos, maxDist = 6)     // → descriptor | null
+fish.tryCatch(pos, radius = 0.45)  // → descriptor | null  (rolls for escape)
+fish.startle(pos, radius, strength) // 0..1 strength, propagates through shoals
+fish.setSpawnRate(x)               // 0..2, re-seeds the shoals near you
+```
+
+A **descriptor** is `{ species, name, length, weight, position, distance,
+startled, color }`. `species` is one of `minnow | perch | pike | loach`.
+
+* On a successful `tryCatch` I emit `FISH_CAUGHT { fish, position, species }`,
+  `BUBBLES` and `SFX { name: 'fish-catch' }`; on a miss `FISH_ESCAPED` plus
+  `SFX { name: 'fish-escape' }`. Escape chance rises steeply with the fish's
+  wariness and whether it is already startled, so **charging a shoal makes it
+  uncatchable** — the intended loop is drift in slowly, then strike.
+* I listen for `EVENTS.DIVE` (always a startle) and `EVENTS.SPLASH` with
+  `strength >= 0.45`. My own surface rises emit `SPLASH` at strength ~0.2 so
+  they do not scare the shoal that made them — keep incidental splashes below
+  0.45 unless you mean to scatter the fish.
+* Surface rises call `ctx.water.addRipple()` directly and emit
+  `SFX { name: 'fish-rise' }`. Audio may want `fish-rise`, `fish-catch`,
+  `fish-escape`.
+* Fish never cast or receive shadows and are excluded from nothing — they are
+  drawn in the water's refraction pass, which is what makes them visible from
+  above the surface.
+
+Requests for other owners (all optional, nothing is broken without them):
+
+* **vegetation**: if you publish a query like `vegetation.coverAt(s, u)` or a
+  list of weed-bed centres, perch and pike would shelter in the real weed
+  instead of the species' preferred `|u|` lane, which is all I can do today.
+* **minigames / quests**: `tryCatch` is the whole catching contract; call it
+  from the player's bill position with a radius around 0.35–0.5 m.
