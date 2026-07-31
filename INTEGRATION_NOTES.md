@@ -451,3 +451,107 @@ from `player.grounded / speed`, since nothing emits a step event.
 * Request for `src/main.js` (not made, worked around): nothing. The system
   boots from the manifest and needs no handle. `window.__duck.sys.audio` is
   enough for the capture harness.
+
+---
+
+## gameplay (`src/gameplay/quests.js`, `minigames.js`, `hud.js`, `src/ui/hud-game.css`)
+
+**Cost: 0 draw calls, 0 triangles.** The whole interface is DOM inside
+`#ui-root`; nothing is added to the scene. Per frame it does ~15 property
+writes, all guarded by a cached-value check, and allocates nothing.
+
+### What is on `ctx`
+
+```js
+ctx.quests.current           // { key, title, objective, hint, icon, progress }
+ctx.quests.objectiveTarget   // Vector3 | null  (scratch — copy it, don't keep it)
+ctx.quests.objectiveLabel    // "24 m"
+ctx.quests.completed         // Set of keys, persisted
+ctx.quests.fishCaught        // lifetime tally, persisted
+ctx.quests.catchPrompt       // a fish is inside snapping range right now
+ctx.quests.pilot             // { active, target } — the tap-to-swim course
+ctx.quests.suppressInput(b)  // zeroes input.move (HUD uses it while paused)
+ctx.quests.skip() / .resetProgress()
+
+ctx.minigames.modes          // [{ key, name, icon, blurb, duration, spot }]
+ctx.minigames.active         // { key, name, timeLeft, score, label, danger } | null
+ctx.minigames.best           // { key: score }, persisted
+ctx.minigames.offer          // the mode whose pool you are floating in
+ctx.minigames.start(key) / .stop(reason) / .isRunning
+
+ctx.hud.setPaused(b) / .paused / .volume
+```
+
+Events emitted: `QUEST_STARTED / QUEST_PROGRESS / QUEST_COMPLETED`,
+`GAME_STARTED { mode, name, blurb, duration, best }`,
+`GAME_ENDED { mode, name, score, best, isBest, summary, reason }`,
+`TOAST`, `LESSON { title, body, eyebrow }`, `SFX { name }`.
+Consumed: `TOAST`, `LESSON`, `FISH_CAUGHT`, `QUACK`, `GAME_*`.
+
+**SFX names this layer emits** (for `gameplay/audio.js`): `chime` (quest or
+game completed), `bell` (game ended, no new best), `snap` (a missed strike at a
+fish), `tap` (a swim course was set). `fish-catch` / `fish-escape` come from
+fish.js as documented above.
+
+**Volume**: the pause slider calls `audio.setMasterVolume(v)` and, as a
+fallback, `audio.setVolume(v)`, both optional-chained, and stores the value in
+`localStorage['duckling.volume']`. Implement either name.
+
+### Two verbs this layer had to add, and where they live
+
+1. **`E` underwater = snap at a fish.** `duckPlayer._interact()` returns early
+   while submerged, so the key was free there; `quests._tryCatch()` calls
+   `fish.tryCatch(billPosition, 0.55)`. Above water E is still duckPlayer's
+   dabble/preen — quests only *mirrors* the depth test so it knows which verb
+   ran. If duckPlayer ever changes its dabble depth window (0.35–1.15 m), the
+   copy in `quests.update()` needs the same numbers.
+
+2. **Tap / click the water to swim there.** `Input.update()` rewrites
+   `input.move` from the keyboard at the top of every frame and the player
+   reads it before any gameplay system runs, so an autopilot cannot be written
+   from a system's `update()`. `quests._wrapInput()` therefore **wraps
+   `ctx.input.update`** at boot (`orig(); this._drive(input)`), which is the
+   only ordering that works today. It yields the moment `move` is non-zero or
+   dive/flap is held, and clamps the course to `|u| <= 0.92` so a tap can never
+   beach the duck. Course is set from a `pointerup` on the canvas with
+   < 420 ms held and < 10 px of travel, so drag-to-look is unaffected.
+
+   **Request for `core/input.js`**: an official hook would remove the monkey
+   patch — either `input.setAxisOverride(fn)` called at the end of `update()`,
+   or a public `input.moveOverride` Vector2 that `update()` folds in when the
+   keyboard is idle. Same for the `G` key: the HUD/minigames layer binds a raw
+   `keydown` listener for `KeyG` ("start the game you are floating in") because
+   `KEY_MAP` has no free action for it. `KeyG: 'play'` in `KEY_MAP` would let me
+   drop that listener.
+
+### HUD notes for everyone else
+
+* `src/ui/hud.css` keeps the tokens and the boot screen; everything this layer
+  draws is in `src/ui/hud-game.css`, imported from `hud.js`. The interim
+  `#controls` card is hidden by `#controls { display: none !important; }` — the
+  pause panel (Esc) now carries the full control list.
+* `body.capture` hides the HUD (`display: none`), so critic captures are
+  unaffected. **A HUD screenshot cannot use `__duck.grab()`** — that reads the
+  WebGL drawing buffer and never contains DOM. `tools/shots/hud.json` shows the
+  trick: `__duck.screenshotMode(false); __duck.grab = () => null;` in `setup`,
+  which forces the harness onto its `page.screenshot()` fallback.
+* **Escape does not freeze the simulation.** `main.js` owns `game.paused` and
+  the panel would then be unable to un-pause itself through the game loop, so
+  the river keeps drifting behind the panel (which also looks better) and the
+  panel only suppresses player input. If main.js ever exposes a pause that
+  still ticks the HUD, say so and I will use it.
+* Quality changes from the panel set `settings.quality` but only take effect on
+  **Restart** (which reloads with `?q=<tier>`), because systems build their
+  buffers from the tier at `init()`.
+* Progress lives in `localStorage['duckling.progress.v2']` and bests in
+  `['duckling.bests.v1']`. Clearing them, or the panel's "Reset progress",
+  restarts the story from the first objective.
+
+### Still weak
+
+* The pause panel's slider/select styling is browser-default under the paper
+  card; it is legible but not bespoke.
+* `follow-leader` scores off `family.distanceToPlayer` (player → **mother**),
+  so hugging a duckling instead of the hen scores nothing.
+* The breath-hold game has no "deepest point of this pool" marker — it just
+  rewards depth, so a deep spot anywhere in the pool counts.

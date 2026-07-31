@@ -36,7 +36,7 @@ const CONTROLS = [
   ['F', 'flap — a short hop'],
   ['Q', 'quack'],
   ['E', 'dabble in the shallows, preen elsewhere, snap at a fish underwater'],
-  ['Tap / click the water', 'swim there'],
+  ['Tap / click', 'swim to that spot on the water'],
   ['Drag', 'look around · wheel zooms'],
   ['G', 'start the game you are floating in'],
   ['Esc', 'pause, settings and this list'],

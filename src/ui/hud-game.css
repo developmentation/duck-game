@@ -666,7 +666,7 @@ body.capture .hud { display: none; }
 
 .controls .ctl {
   display: grid;
-  grid-template-columns: 108px 1fr;
+  grid-template-columns: 124px 1fr;
   gap: 10px;
   align-items: baseline;
   padding: 3px 0;

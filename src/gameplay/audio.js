@@ -785,7 +785,9 @@ export class Audio {
     const voice = this._gain(1);
     voice.connect(tone).connect(dest);
 
-    const r = this.rand();
+    // Dawn favours the warblers and the pigeon; dusk brings out the crows.
+    const bias = tod < 0.35 ? -0.1 : tod > 0.66 ? 0.12 : 0;
+    const r = clamp(this.rand() + bias, 0, 0.999);
     const level = (0.09 + this.rand() * 0.06) * lerp(1, 0.45, far);
     let end = t;
 
