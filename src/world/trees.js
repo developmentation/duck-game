@@ -18,9 +18,11 @@
  *     underneath and luminous on top;
  *   • willows that lean out over the water and hang long trailing fronds.
  *
- * Everything is merged into a handful of chunk meshes along the river (two
- * draw calls each: bark and leaf) and frustum/distance culled. Wind comes from
- * the vegetation system's shared `vegWind`, with the canopy LAGGING the trunk
+ * Everything is merged into a handful of chunk meshes along the river — ONE
+ * draw call each, because the bark samples a deliberately opaque corner of the
+ * leaf atlas at a constant UV (constant UV ⇒ zero derivative ⇒ mip 0, so the
+ * alpha cut-out can never eat a trunk) — and frustum/distance culled. Wind
+ * comes from the vegetation system's shared `vegWind`, the canopy LAGGING the trunk
  * and the willow fronds lagging further still, so a gust visibly travels up
  * and out through the tree.
  */
@@ -32,12 +34,12 @@ const clamp = THREE.MathUtils.clamp;
 const smoothstep = THREE.MathUtils.smoothstep;
 const lerp = THREE.MathUtils.lerp;
 
-const CHUNKS = 10;
-const CULL_DIST = 430;
-const SHADOW_DIST = 160;
+const CHUNKS = 8;
+const CULL_DIST = 400;
+const SHADOW_DIST = 140;
 // Beyond this a tree contributes nothing readable to the planar water
 // reflection, so it is moved off the reflected layer entirely.
-const REFLECT_DIST = 185;
+const REFLECT_DIST = 150;
 
 // ── procedural leaf atlas ──────────────────────────────────────────────────
 
@@ -121,7 +123,10 @@ function makeLeafAtlas(size, seed) {
   drawCluster(g, 0, 0, half, rng, 0);
   drawCluster(g, half, 0, half, rng, 1);
   drawCluster(g, 0, half, half, rng, 2);
-  drawFrond(g, half, half, half, rng);
+  drawFrond(g, half, half, half * 0.74, rng);
+  // Opaque swatch the bark samples: pure white, so vertex colour is the bark.
+  g.fillStyle = 'rgb(255,255,255)';
+  g.fillRect(size * 0.87, half, size * 0.13, half);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
@@ -137,19 +142,21 @@ const TILES = [
   [0.506, 0.006, 0.488, 0.488],
   [0.006, 0.506, 0.488, 0.488],
 ];
-const FROND_TILE = [0.506, 0.506, 0.488, 0.488];
+const FROND_TILE = [0.506, 0.506, 0.352, 0.488];
+/** Dead centre of the opaque swatch — every bark vertex uses exactly this. */
+const BARK_UV = [0.935, 0.75];
 
 // ── geometry accumulation ──────────────────────────────────────────────────
 
 class Buf {
-  constructor(withUV) {
+  constructor() {
     this.pos = [];
     this.nrm = [];
     this.col = [];
-    this.uv = withUV ? [] : null;
+    this.uv = [];
     this.wind = []; // vec4 originX, originZ, phase, sway
     this.lag = [];
-    this.card = withUV ? [] : null; // vec3 offset from the card centre
+    this.card = []; // vec3 offset from the card centre; (0,0,0) for bark
     this.idx = [];
   }
   get count() { return this.pos.length / 3; }
@@ -157,20 +164,20 @@ class Buf {
     this.pos.push(p.x, p.y, p.z);
     this.nrm.push(n.x, n.y, n.z);
     this.col.push(c.r, c.g, c.b);
-    if (this.uv) this.uv.push(u, v);
+    this.uv.push(u, v);
     this.wind.push(w[0], w[1], w[2], w[3]);
     this.lag.push(w[4]);
-    if (this.card) this.card.push(card ? card.x : 0, card ? card.y : 0, card ? card.z : 0);
+    this.card.push(card ? card.x : 0, card ? card.y : 0, card ? card.z : 0);
   }
   toGeometry() {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nrm, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
-    if (this.uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
     g.setAttribute('aWind', new THREE.Float32BufferAttribute(this.wind, 4));
     g.setAttribute('aLag', new THREE.Float32BufferAttribute(this.lag, 1));
-    if (this.card) g.setAttribute('aCard', new THREE.Float32BufferAttribute(this.card, 3));
+    g.setAttribute('aCard', new THREE.Float32BufferAttribute(this.card, 3));
     const IndexArray = this.count > 65535 ? Uint32Array : Uint16Array;
     g.setIndex(new THREE.BufferAttribute(new IndexArray(this.idx), 1));
     g.computeBoundingSphere();
@@ -216,15 +223,13 @@ export class Trees {
 
   // ── materials ────────────────────────────────────────────────────────────
 
-  _windVertexChunk(isLeaf) {
+  _windVertexChunk() {
     return /* glsl */ `
   vec3 transformed = vec3( position );
-  ${isLeaf ? `
   vec3 cardCentre = transformed - aCard;
   float dcam = distance(cardCentre, uCamPos);
   // cards grow slightly with distance so a canopy never fizzes into holes
   transformed = cardCentre + aCard * (1.0 + smoothstep(45.0, 240.0, dcam) * 0.85);
-  ` : ''}
   vec2 w = vegWind(aWind.xy, uWindPhase + aWind.z - aLag * uLag);
   float sway = aWind.w;
   transformed.xz += w * sway * uTreeBend;
@@ -232,13 +237,12 @@ export class Trees {
 `;
   }
 
-  _patch(mat, isLeaf, depth) {
+  _patch(mat, depth) {
     const u = this.shared.uniforms;
-    const extra = {
-      uTreeBend: { value: 0.30 },
+    this._extra = this._extra || {
+      uTreeBend: { value: 0.34 },
       uLag: { value: 0.55 },
     };
-    this._extra = this._extra || extra;
     mat.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, u, this._extra);
       shader.vertexShader = shader.vertexShader
@@ -250,12 +254,12 @@ uniform float uTreeBend;
 uniform float uLag;
 attribute vec4 aWind;
 attribute float aLag;
-${isLeaf ? 'attribute vec3 aCard;' : ''}
-${depth ? '' : 'varying float vLeafLag;'}
+attribute vec3 aCard;
+${depth ? '' : 'varying float vIsLeaf;'}
 ${this.shared.windGlsl}`
         )
-        .replace('#include <begin_vertex>', this._windVertexChunk(isLeaf) +
-          (depth ? '' : '  vLeafLag = aWind.w;'));
+        .replace('#include <begin_vertex>', this._windVertexChunk() +
+          (depth ? '' : '  vIsLeaf = step(1e-5, dot(aCard, aCard));'));
 
       if (!depth) {
         shader.fragmentShader = shader.fragmentShader
@@ -265,7 +269,7 @@ ${this.shared.windGlsl}`
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform vec3 uSkyColor;
-varying float vLeafLag;`
+varying float vIsLeaf;`
           )
           .replace(
             '#include <opaque_fragment>',
@@ -273,25 +277,22 @@ varying float vLeafLag;`
     vec3 L = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz);
     vec3 V = normalize(vViewPosition);
     float back = max(0.0, dot(-V, L));
-    float glow = pow(back, ${isLeaf ? '2.4' : '5.0'}) * ${isLeaf ? '1.25' : '0.25'};
+    // leaves transmit; bark only takes a tight rim
+    float glow = mix(pow(back, 6.0) * 0.30, pow(back, 2.3) * 1.30, vIsLeaf);
     outgoingLight += glow * uSunColor * (diffuseColor.rgb * 1.4 + 0.10);
-    outgoingLight += uSkyColor * diffuseColor.rgb * ${isLeaf ? '0.13' : '0.07'};
+    outgoingLight += uSkyColor * diffuseColor.rgb * mix(0.06, 0.13, vIsLeaf);
   }
   #include <opaque_fragment>`
           );
       }
       mat.userData.shader = shader;
     };
-    mat.customProgramCacheKey = () => `tree-${isLeaf ? 'leaf' : 'bark'}-${depth ? 'd' : 'c'}`;
+    mat.customProgramCacheKey = () => `tree-${depth ? 'depth' : 'colour'}`;
     return mat;
   }
 
   _makeMaterials() {
-    this.barkMaterial = this._patch(
-      new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }),
-      false, false
-    );
-    this.leafMaterial = this._patch(
+    this.treeMaterial = this._patch(
       new THREE.MeshLambertMaterial({
         color: 0xffffff,
         vertexColors: true,
@@ -299,22 +300,18 @@ varying float vLeafLag;`
         alphaTest: 0.34,
         side: THREE.DoubleSide,
       }),
-      true, false
+      false
     );
-    this.barkDepth = this._patch(
-      new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }),
-      false, true
-    );
-    this.leafDepth = this._patch(
+    this.treeDepth = this._patch(
       new THREE.MeshDepthMaterial({
         depthPacking: THREE.RGBADepthPacking,
         map: this.atlas,
         alphaTest: 0.34,
         side: THREE.DoubleSide,
       }),
-      true, true
+      true
     );
-    this._mats.push(this.barkMaterial, this.leafMaterial, this.barkDepth, this.leafDepth);
+    this._mats.push(this.treeMaterial, this.treeDepth);
   }
 
   // ── placement ────────────────────────────────────────────────────────────
@@ -376,40 +373,23 @@ varying float vLeafLag;`
     for (let ci = 0; ci < CHUNKS; ci++) {
       const slice = this.trees.slice(ci * perChunk, (ci + 1) * perChunk);
       if (!slice.length) continue;
-      const bark = new Buf(false);
-      const leaf = new Buf(true);
-      for (const t of slice) this._growTree(t, bark, leaf);
-      const chunk = { meshes: [], center: new THREE.Vector3(), radius: 0 };
-
-      if (bark.count) {
-        const g = bark.toGeometry();
-        this._geoms.push(g);
-        const m = new THREE.Mesh(g, this.barkMaterial);
-        m.customDepthMaterial = this.barkDepth;
-        m.castShadow = true;
-        m.receiveShadow = true;
-        m.name = `treeBark${ci}`;
-        this.group.add(m);
-        chunk.meshes.push(m);
-        chunk.center.copy(g.boundingSphere.center);
-        chunk.radius = g.boundingSphere.radius;
-      }
-      if (leaf.count) {
-        const g = leaf.toGeometry();
-        this._geoms.push(g);
-        const m = new THREE.Mesh(g, this.leafMaterial);
-        m.customDepthMaterial = this.leafDepth;
-        m.castShadow = true;
-        m.receiveShadow = true;
-        m.name = `treeLeaf${ci}`;
-        this.group.add(m);
-        chunk.meshes.push(m);
-        if (chunk.radius === 0) {
-          chunk.center.copy(g.boundingSphere.center);
-          chunk.radius = g.boundingSphere.radius;
-        }
-      }
-      this.chunks.push(chunk);
+      const buf = new Buf();
+      for (const t of slice) this._growTree(t, buf, buf);
+      if (!buf.count) continue;
+      const g = buf.toGeometry();
+      this._geoms.push(g);
+      const m = new THREE.Mesh(g, this.treeMaterial);
+      m.customDepthMaterial = this.treeDepth;
+      m.castShadow = true;
+      m.receiveShadow = true;
+      m.name = `trees${ci}`;
+      this.group.add(m);
+      this.chunks.push({
+        meshes: [m],
+        center: g.boundingSphere.center.clone(),
+        radius: g.boundingSphere.radius,
+        reflected: true,
+      });
     }
   }
 
@@ -570,7 +550,7 @@ varying float vLeafLag;`
         const shade = 0.70 + 0.30 * clamp(n.y * 0.5 + 0.6, 0, 1);
         w[3] = sway; w[4] = lag;
         cs.copy(c).multiplyScalar(shade);
-        bark.vert(p, n, cs, 0, 0, w, null);
+        bark.vert(p, n, cs, BARK_UV[0], BARK_UV[1], w, null);
       }
     }
     for (let i = 0; i < nodes.length - 1; i++) {

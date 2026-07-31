@@ -835,6 +835,7 @@ varying float vTip;`
     mesh.castShadow = false;
     mesh.receiveShadow = true;
     mesh.frustumCulled = false;
+    mesh.layers.set(NO_REFLECT_LAYER);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(total * 3), 3);
     const aVeg = new THREE.InstancedBufferAttribute(new Float32Array(total * 4), 4);
