@@ -155,9 +155,12 @@ class Agent {
     this.chatter = rnd();             // quacks and peeps
     this.runt = false;
 
-    this.slot = 0;                    // nominal metres behind the leader
+    this.slot = 0;                    // live metres behind the leader
+    this.slotBase = 0;                // the slot it is heading for
+    this.playerRank = 0;              // place in the line behind the player
     this.side = 0;                    // lateral offset in the line
     this.lag = 0;                     // live extra lag, drifts
+    this.hurryT = 0;                  // sprinting to close a gap it just noticed
     this.maxSpeed = 1.55;
     this.sprint = 1;
     this.gap = 0;                     // distance to its slot point
@@ -265,7 +268,7 @@ export class Family {
 
     // Mother: a mallard hen, noticeably bigger than the brood.
     const hen = createDuck({
-      variant: 'hen', scale: 1.30, seed: 21, castShadow: true,
+      variant: 'hen', scale: 1.42, seed: 21, castShadow: true,
     });
     this.mother = new Agent('mother', -1, hen, makeRandom(4242));
     this.mother.maxSpeed = 1.5;
@@ -274,10 +277,13 @@ export class Family {
 
     // The brood. Slot distance grows down the line; the runt is last, smallest
     // and slowest, so it is permanently catching up — that is the whole charm.
+    // Slots are deliberately clumpy, not a ruler: two abreast, a gap, a knot of
+    // three, then the runt trailing a long way back.
+    const SLOTS = [0.90, 1.10, 1.95, 2.30, 2.62, 3.45, 3.80, 5.10];
     for (let i = 0; i < count; i++) {
       const rnd = makeRandom(9001 + i * 7717);
       const runt = i === count - 1;
-      const size = runt ? 1.30 : 1.44 + rnd() * 0.34;
+      const size = runt ? 1.10 : 1.28 + rnd() * 0.30;
       const duck = createDuck({
         variant: 'duckling',
         scale: size,
@@ -287,15 +293,17 @@ export class Family {
       });
       const a = new Agent('duckling', i, duck, rnd);
       a.runt = runt;
-      a.slot = 0.95 + i * 0.72 + rnd() * 0.16;
-      a.side = (i % 2 === 0 ? 1 : -1) * (0.10 + rnd() * 0.26);
-      a.maxSpeed = (runt ? 1.30 : 1.55 + rnd() * 0.30);
-      a.laziness = runt ? 0.85 : a.laziness * 0.8;
-      a.boldness = runt ? 0.15 : a.boldness;
+      a.slotBase = (SLOTS[i] ?? 0.9 + i * 0.7) + rnd() * 0.12;
+      a.slot = a.slotBase;
+      a.side = (i % 2 === 0 ? 1 : -1) * (0.16 + rnd() * 0.24);
+      a.maxSpeed = (runt ? 1.42 : 1.55 + rnd() * 0.32);
+      a.laziness = runt ? 1.0 : 0.15 + a.laziness * 0.75;
+      a.boldness = runt ? 0.10 : 0.25 + a.boldness * 0.75;
       this.group.add(duck.object);
       this.ducklings.push(a);
       this._agents.push(a);
     }
+    this.swapT = 5;
     this.leader = this.mother;
 
     this._buildRockIndex();
@@ -571,7 +579,7 @@ export class Family {
   _pickLine(s, cur) {
     const river = this.river;
     const ahead = clamp(s + 8, 2, river.length - 2);
-    const wander = this.noise.noise2(this.elapsed * 0.035, 7.31);
+    const wander = this.noise.noise2(this.elapsed * 0.075, 7.31);
     const bend = clamp(river.curvature(ahead) * 30, -0.5, 0.5);
     let best = cur, bestScore = -Infinity;
     for (let i = -3; i <= 3; i++) {
@@ -579,7 +587,7 @@ export class Family {
       const depth = river.depth(ahead, u);
       let score = smoothstep(depth, 0.35, 1.5) * 2.2;      // stay off the bars
       score -= Math.abs(u) * 0.45;                          // prefer mid channel
-      score += wander * u * 1.1;                            // slow meander
+      score += wander * u * 1.6;                            // slow meander
       score -= Math.abs(u - bend) * 0.35;                   // follow the scour
       river.toWorld(ahead, u, WATER_LEVEL, this._a);
       score -= this._rockPenalty(ahead, this._a.x, this._a.z, 1.6) * 2.0;
@@ -597,6 +605,22 @@ export class Family {
    * long enough to read.
    */
   _updateLeadership(dt, player) {
+    // Jostling for position: every so often two neighbours trade slots, and
+    // everyone eases toward whatever slot they currently own.
+    this.swapT -= dt;
+    if (this.swapT <= 0 && this.ducklings.length > 2) {
+      this.swapT = 4 + this.rnd() * 7;
+      const i = 1 + Math.floor(this.rnd() * (this.ducklings.length - 2));
+      const a = this.ducklings[i - 1], b = this.ducklings[i];
+      if (!a.runt && !b.runt) {
+        const t = a.slotBase; a.slotBase = b.slotBase; b.slotBase = t;
+        a.side = -a.side; b.side = -b.side;
+      }
+    }
+    for (const a of this.ducklings) {
+      a.slot = lerp(a.slot, a.slotBase, clamp(dt * 0.7, 0, 1));
+    }
+
     let following = 0;
     if (!player) {
       for (const a of this.ducklings) a.leader = 'mother';
@@ -611,24 +635,30 @@ export class Family {
     for (const a of this.ducklings) {
       a.leaderHold = Math.max(0, a.leaderHold - dt);
       if (this.gatherT > 0) { a.leader = 'mother'; continue; }
-      if (a.leaderHold > 0) { if (a.leader === 'player') following++; continue; }
+      if (a.leaderHold > 0) {
+        if (a.leader === 'player') a.playerRank = following++;
+        continue;
+      }
       const dPlayer = a.position.distanceTo(player.position);
       const dMother = a.position.distanceTo(this.mother.position);
-      // Bold ducklings switch at a longer range; the runt basically never does.
-      const range = 2.4 + a.boldness * 5.0;
+      // A duckling follows you if you are near it and *in front of* it — the
+      // same rule it applies to its mother. Bold ones commit at longer range;
+      // the runt never leaves mum.
+      const ahead = pc.s - a.coord.s;
+      const range = 2.6 + a.boldness * 5.5;
       const wantPlayer =
         !player.submerged &&
         dPlayer < range &&
-        dPlayer < dMother * 1.35 &&
-        (leadAmount > -1.0 || playerMoving) &&
-        a.boldness > 0.22;
+        dPlayer < dMother + 3.5 &&
+        (ahead > 0.4 || (leadAmount > 0.5 && playerMoving)) &&
+        a.boldness > 0.28;
       const next = wantPlayer ? 'player' : 'mother';
       if (next !== a.leader) {
         a.leader = next;
-        a.leaderHold = next === 'player' ? 2.6 + a.boldness * 3.0 : 1.6;
+        a.leaderHold = next === 'player' ? 3.0 + a.boldness * 3.5 : 1.8;
         if (next === 'player') this._peep(a);
       }
-      if (a.leader === 'player') following++;
+      if (a.leader === 'player') a.playerRank = following++;
     }
 
     if (following !== this.followingPlayer && following > 0 && this.leadToastT <= 0) {
@@ -656,9 +686,17 @@ export class Family {
     const trail = a.leader === 'player' && player ? this.playerTrail : this.motherTrail;
 
     // --- lag: the line breathes. Lazy ducklings drop back, then notice.
-    const wob = this.noise.noise2(this.elapsed * 0.22 + a.index * 3.7, a.index * 1.13);
-    const lagTarget = (0.25 + a.laziness * 1.5) * (0.5 + 0.5 * wob) + (a.runt ? 0.6 : 0);
-    a.lag = lerp(a.lag, lagTarget, clamp(dt * 0.6, 0, 1));
+    const wob = this.noise.noise2(this.elapsed * 0.19 + a.index * 3.7, a.index * 1.13);
+    let lagTarget = (0.15 + a.laziness * 2.1) * (0.35 + 0.65 * wob) + (a.runt ? 1.5 : 0);
+    // …and then it notices how far back it is and sprints to close the gap.
+    a.hurryT = Math.max(0, (a.hurryT || 0) - dt);
+    if (a.lag > 1.5 && a.hurryT <= 0 && this.rnd() < dt * 0.9) {
+      a.hurryT = 1.6 + this.rnd() * 1.4;
+      a.sprint = 2.0;
+      if (this.rnd() < 0.4) this._peep(a);
+    }
+    if (a.hurryT > 0) lagTarget = 0;
+    a.lag = lerp(a.lag, lagTarget, clamp(dt * (a.hurryT > 0 ? 1.6 : 0.35), 0, 1));
 
     // --- idle behaviours -------------------------------------------------
     a.nextIdle -= dt;
@@ -721,7 +759,8 @@ export class Family {
         this.mother.position.z + Math.sin(ang) * rad * 0.8
       );
     } else {
-      const back = (a.slot + a.lag) * (this.gatherT > 0 ? 0.45 : 1);
+      const nominal = a.leader === 'player' ? 0.85 + a.playerRank * 0.78 : a.slot;
+      const back = (nominal + a.lag) * (this.gatherT > 0 ? 0.45 : 1);
       const got = trail.sample(back, this._desired);
       // Lateral jostle: they weave for the slot right behind the leader.
       const jostle = this.noise.noise2(this.elapsed * 0.5 + a.index * 5.1, a.index * 0.77);
