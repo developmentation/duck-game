@@ -584,19 +584,20 @@ export class Particles {
             col = mix(vCol, uSunColor * 1.15, 0.35 + 0.35 * foam);
             a = band * vP2.x * life * (0.55 + 0.65 * foam);
           } else {
-            // splash curtain: a wall of water rising and thinning
+            // splash curtain: a torn sheet of white water thrown up and
+            // collapsing. Broken hard by noise so it never reads as a quad.
             float x = p.x;
-            float prof = 1.0 - x * x;                 // arc profile
-            float top = prof * (0.35 + 0.65 * (1.0 - life * 0.55));
             float h = vUv.y;
-            float body = (1.0 - smoothstep(top - 0.30, top + 0.03, h)) * smoothstep(0.0, 0.16, h);
-            float streak = fbm3(vec2(x * 6.0 + seed * 21.0, h * 3.2 - uTime * 0.4));
-            body *= 0.45 + 0.9 * streak;
-            body *= 1.0 - smoothstep(0.55, 1.0, abs(x));
-            float crest = (1.0 - smoothstep(0.0, 0.10, abs(h - top))) * streak;
+            float prof = max(0.0, 1.0 - x * x);
+            float streak = fbm3(vec2(x * 5.0 + seed * 21.0, h * 2.2 - uTime * 0.35));
+            float edge = prof * (0.28 + 0.62 * pow(life, 0.35)) * (0.70 + 0.60 * streak);
+            float body = (1.0 - smoothstep(edge - 0.26, edge + 0.02, h)) * smoothstep(0.0, 0.30, h);
+            body *= 1.0 - smoothstep(0.42, 0.98, abs(x));
+            body *= max(0.0, 0.20 + 1.05 * streak - 0.35);
+            float crest = (1.0 - smoothstep(0.0, 0.07, abs(h - edge))) * smoothstep(0.15, 0.55, streak);
             vec3 warm = uSunColor * 1.2;
-            col = mix(vCol, warm, 0.25 + 0.55 * crest);
-            a = (body * 0.75 + crest * 0.55) * vP2.x * life;
+            col = mix(vCol, warm, 0.22 + 0.55 * crest);
+            a = (body * 0.85 + crest * 0.5) * vP2.x * life;
           }
 
           if (vP2.w > 0.5) a *= smoothstep(7.0, 22.0, vZ);
@@ -779,7 +780,7 @@ export class Particles {
     const rr = Math.sqrt(rng()) * radius;
     const y = cy + (rng() - 0.25) * radius * 0.8;
     const i = this._spawnMote(cx + Math.cos(a) * rr, y, cz + Math.sin(a) * rr,
-      M_DUST, 0.012 + rng() * 0.022, 14 + rng() * 16, 0.55 + rng() * 0.45);
+      M_DUST, 0.009 + rng() * 0.016, 14 + rng() * 16, 0.55 + rng() * 0.45);
     if (i >= 0) this.motes.age[i] = rng() * 2.0;
     return i;
   }
@@ -845,12 +846,12 @@ export class Particles {
     // fine spray hanging above it
     this.sprayBurst(x, y + 0.06, z, Math.round(6 + st * 16), st * 0.8, dir);
     // the sheet / curtain
-    const w = 0.55 + st * 1.5;
-    const i = this._sheetSpawn(S_SHEET, x, y + 0.02, z, w, w * (0.42 + st * 0.20),
-      0.42 + st * 0.22, _clamp(0.35 + st * 0.4, 0.2, 0.85), 0, null);
+    const w = 0.38 + st * 0.72;
+    const i = this._sheetSpawn(S_SHEET, x, y + 0.02, z, w, w * (0.52 + st * 0.18),
+      0.34 + st * 0.18, _clamp(0.16 + st * 0.22, 0.10, 0.44), 0, null);
     if (i >= 0) {
-      this.sheets.vx[i] = w * (1.7 + st * 0.9);   // grow to
-      this.sheets.a1[i] = _clamp(0.35 + st * 0.4, 0.2, 0.85);
+      this.sheets.vx[i] = w * (1.35 + st * 0.35);   // grow to
+      this.sheets.a1[i] = _clamp(0.16 + st * 0.22, 0.10, 0.44);
       this.sheets.seed[i] = rng();
     }
     // foam ring on the surface + real water ripple
@@ -1432,7 +1433,7 @@ export class Particles {
     const t = this.ctx.settings?.timeOfDay ?? 0.3;
     const day = _clamp((t - 0.18) * 6, 0, 1) * _clamp((0.88 - t) * 6, 0, 1);
     const low = 0.55 + 0.45 * Math.exp(-((t - 0.27) ** 2) / 0.006) + 0.45 * Math.exp(-((t - 0.76) ** 2) / 0.006);
-    return day * Math.min(1.4, low) * 1.9;
+    return day * Math.min(1.4, low) * 1.15;
   }
 
   _updateSheets(dt) {
