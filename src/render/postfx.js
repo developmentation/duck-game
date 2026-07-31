@@ -1075,7 +1075,9 @@ export class PostFX {
       bloomKnee: 0.70,
       bloomScale: 1.0,
       aoIntensity: 0.55,
-      dofScale: 1.0,
+      // Below full on purpose: depth of field is a garnish in this game, and
+      // the pause menu exposes it as "Distance blur", 0-100%.
+      dofScale: 0.55,
       godrayScale: 1.0,
       gradeScale: 1.0,
     };
@@ -1154,7 +1156,9 @@ export class PostFX {
 
     if (wantDOF && this.gbuffer) {
       this.dof = new DOFPass(this.gbuffer, this.camera, w, h);
-      this.dof.maxRadius = q.name === 'high' ? 8.0 : 6.0;
+      // Half-res gather, so this doubles at full resolution — 8 px read as a
+      // smear on a laptop panel rather than as a lens.
+      this.dof.maxRadius = q.name === 'high' ? 4.5 : 3.5;
       this._add(this.dof);
     }
 
@@ -1365,12 +1369,20 @@ export class PostFX {
       const q = settings.quality;
       const base = q.name === 'high' ? 1.0 : 0.8;
       this.dof.intensity = base * this.params.dofScale * (1 + this.wet * 0.35);
-      this.dof.nearStrength = 0.55;
-      this.dof.farStrength = 0.22;
-      // uNearRange: focus/d - 1 at which the near field is fully soft.
-      // 1.6 ≈ everything closer than ~0.4x the focus distance.
-      this.dof.cocMat.uniforms.uNearRange.value = 2.6;
-      this.dof.cocMat.uniforms.uFarAmt.value = lerp(0.22, 0.40, this.wet);
+      // Near blur was 0.55 over a wide range, which was the bug behind "the
+      // whole screen is out of focus". In a third-person game the water plane
+      // runs from just under the camera to the horizon, so everything nearer
+      // than the duck is not foreground bokeh — it is the play space, and it
+      // filled most of the frame. Keep a whisper of it for the very closest
+      // reeds only.
+      this.dof.nearStrength = 0.14;
+      this.dof.farStrength = 0.16;
+      // uNearRange: focus/d − 1 at which the near field is fully soft. 0.9 means
+      // only things inside about half the focus distance soften at all.
+      this.dof.cocMat.uniforms.uNearRange.value = 0.9;
+      this.dof.cocMat.uniforms.uNearAmt.value = 0.14;
+      // Far side: enough to sit the distance back, never enough to dissolve it.
+      this.dof.cocMat.uniforms.uFarAmt.value = lerp(0.14, 0.26, this.wet);
     }
 
     /* grade ------------------------------------------------------------ */
