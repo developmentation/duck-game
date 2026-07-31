@@ -516,7 +516,10 @@ export class Particles {
         varying vec2 vUv; varying vec4 vP; varying vec4 vP2;
         varying vec3 vCol; varying float vZ; varying vec2 vSunUv;
         void main(){
-          vUv = uv; vP = iParams; vP2 = iParams2; vCol = iColor;
+          // NOTE: derive uv from position — the shared PlaneGeometry 'uv'
+          // attribute comes through this InstancedBufferGeometry constant.
+          vUv = position.xy + 0.5;
+          vP = iParams; vP2 = iParams2; vCol = iColor;
           float rot = iParams.w;
           float cr = cos(rot), sr = sin(rot);
           vec3 right, up;
