@@ -309,6 +309,9 @@ export class Vegetation {
     this._mats = [];
     this._lilyCursor = 0;
     this._sunV = new THREE.Vector3();
+    this._gCool = new THREE.Color(0.80, 1.02, 0.80);
+    this._gWarm = new THREE.Color(1.06, 1.05, 0.74);
+    this._gDry = new THREE.Color(1.34, 1.02, 0.56);
 
     this.uniforms = {
       uWindDir: { value: new THREE.Vector2(this.windDir.x, this.windDir.z) },
@@ -760,10 +763,11 @@ varying float vTip;`
     const veg = this._grassVeg.array;
     const mesh = this.grassMesh;
 
-    // Tints around 1.0 — see the note in _fillReedSlab.
-    const COOL = new THREE.Color(0.80, 1.02, 0.80);
-    const WARM = new THREE.Color(1.06, 1.05, 0.74);
-    const DRY = new THREE.Color(1.34, 1.02, 0.56);
+    // Tints around 1.0 — see the note in _fillReedSlab. Hoisted so a slab
+    // rebuild does not allocate.
+    const COOL = this._gCool;
+    const WARM = this._gWarm;
+    const DRY = this._gDry;
 
     let i = base;
     const end = base + n;

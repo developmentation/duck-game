@@ -154,6 +154,14 @@ Requests for other owners:
   `high` values (38000 / 9000) the four traversals put the frame over the 2.2M
   triangle ceiling on their own. If the extra passes get the layer treatment
   above, remove the clamps in `Vegetation.init()`.
+* **measured cost, `medium` tier, hero shot**: vegetation adds **21 draw calls
+  and 988k triangles** (frame goes 367 → 388 calls, 769k → 1.757M triangles).
+  Of those 21 calls, 10 are the three instanced fields (reeds 4 passes, grass 3,
+  lilies 3) and 11 are the tree chunks. The frame is already at 367 calls
+  *without* vegetation and five systems are still stubs, so the 380 ceiling is
+  going to need a project-level decision, not just my trimming. The cheapest
+  single lever is the layer-11 treatment for the refraction and normal/depth
+  cameras above: that is −6 calls and about −300k triangles on its own.
 * **anyone reading `ctx.camera`** — after boot `main.js` replaces `ctx.camera`
   with the camera *rig* system, so `ctx.camera.matrixWorld` does not exist. Use
   `ctx.engine.camera`. This cost me an hour; it is worth a line in CONTRACT.md.
